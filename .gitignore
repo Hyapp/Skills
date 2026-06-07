@@ -1,22 +1,11 @@
-# Ignore everything by default
 *
-
-# Allow README files (top-level)
 !README.md
 !README.zh.md
-
-# Allow wiki directory
 !wiki
 !wiki/*
-
-# Allow .claude skills directory
-!.claude
-!.claude/*
-!.claude/skills
-!.claude/skills/*
-!.claude/skills/task-compiler
-!.claude/skills/task-compiler/**
-
-# Exclude pycache and runtime output within the skill
-.claude/skills/task-compiler/**/__pycache__/
-.claude/skills/task-compiler/output/
+!skills
+!skills/*
+!skills/task-compiler
+!skills/task-compiler/**
+skills/task-compiler/**/__pycache__/
+skills/task-compiler/output/
