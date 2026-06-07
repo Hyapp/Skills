@@ -117,7 +117,7 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime claude-code|codex|trae]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime claude-code|codex]", file=sys.stderr)
         sys.exit(1)
 
     input_path = Path(sys.argv[1])
@@ -143,12 +143,6 @@ def main():
             cli_max_retries = int(sys.argv[i + 1])
         if arg == "--agent-runtime" and i + 1 < len(sys.argv):
             agent_runtime = sys.argv[i + 1]
-
-    # Validate agent_runtime
-    VALID_AGENT_RUNTIMES = {"claude-code", "codex", "trae"}
-    if agent_runtime and agent_runtime not in VALID_AGENT_RUNTIMES:
-        print(f"Error: invalid agent_runtime '{agent_runtime}'. Valid options: {', '.join(sorted(VALID_AGENT_RUNTIMES))}", file=sys.stderr)
-        sys.exit(1)
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -498,20 +492,13 @@ def main():
         for nid in node_results
     }
 
-    wf_agent_runtime = wf.get("agent_runtime")
-    if wf_agent_runtime and wf_agent_runtime not in VALID_AGENT_RUNTIMES:
-        print(f"Error: workflow.agent_runtime '{wf_agent_runtime}' is not valid. Valid options: {', '.join(sorted(VALID_AGENT_RUNTIMES))}", file=sys.stderr)
-        sys.exit(1)
-
-    final_agent_runtime = wf_agent_runtime or agent_runtime or "claude-code"
-
     plan = {
         "workflow": {
             "name": wf["name"],
             "variables": variables,
             "mode": wf.get("mode", "static"),
             "parallel_n": wf.get("parallel", 1),
-            "agent_runtime": final_agent_runtime,
+            "agent_runtime": agent_runtime or "claude-code",
         },
         "nodes": truncated_node_results,
         "waves": waves,
