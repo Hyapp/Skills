@@ -2,6 +2,10 @@ name: render-feishu
 version: 1
 description: IR → 飞书云文档渲染器
 
+requires:
+  tools:
+    - lark-cli
+
 execute:
   command: python {plugin_dir}/render.py {input_ir}
   input:

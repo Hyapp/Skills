@@ -120,6 +120,9 @@ workflow:
       type: plugin
       description: 消费完整 IR，通过 render-feishu 插件创建飞书云文档
       plugin: render-feishu
+      requires:
+        tools:
+          - lark-cli
       depends_on:
         - build-ir
         - summary-1
