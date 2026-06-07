@@ -1,6 +1,6 @@
-﻿# task-compiler
+﻿# task-compiler — DSL Mode
 
-Execute **vDSL workflows** — define a DAG in YAML, schedule and run nodes in dependency order.
+A companion to Plan mode. Instead of letting the agent reason step-by-step interactively, **DSL mode** lets you describe the entire task as a declarative pipeline. The agent compiles it into an ordered execution plan and runs it end-to-end with dependency resolution, automatic parallelism, error recovery, and resume-from-failure support — ideal for long-running tasks that need high reliability.
 
 Compatible with **Claude Code**, **Codex**, and **Trae**.
 

@@ -1,6 +1,6 @@
-﻿# task-compiler
+﻿# task-compiler — DSL 模式
 
-运行 **vDSL 工作流** — 通过 YAML 定义 DAG，按依赖顺序调度节点执行。
+Plan 模式的搭档。与 Agent 逐步交互推理不同，**DSL 模式**让你将整个任务描述为声明式流水线，Agent 将其编译为有序的执行计划并端到端运行，自动解析依赖、并行调度、处理错误并从失败点恢复 — 适合需要高稳定性的长程任务。
 
 兼容 **Claude Code**、**Codex**、**Trae**。
 
