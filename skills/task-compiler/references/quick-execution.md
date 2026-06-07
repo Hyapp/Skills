@@ -49,8 +49,14 @@ python ./interpreter/execution_state.py ./output/<session> init
 压缩后快速恢复：
 
 ```bash
+# 当前 wave 和下一步
 python ./interpreter/execution_state.py ./output/<session> status
-python ./interpreter/state_index.py ./output/<session> snapshot
+
+# 完整的 session 索引（wave 进度、节点状态、生成物）
+python ./interpreter/state_index.py ./output/<session>
+
+# 查看特定节点
+python ./interpreter/state_index.py ./output/<session> --node summary-2-2
 ```
 
 ## 参考 workflow

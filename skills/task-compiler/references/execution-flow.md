@@ -125,34 +125,50 @@ python ./interpreter/execution_state.py <output_dir> status
 
 主 Agent 无需重新读取 build_plan.json 或推理当前进度——hook 给出确定的下一步操作。
 
-### 状态索引工具
+### 状态索引
 
-`state_index.py` 是一个通用的 key-value 状态存储，主 Agent 用它跟踪任何跨上下文压缩仍需保留的信息：
+`state_index.py` 自动索引 session 目录中的 artifacts，输出完整状态快照：
 
 ```bash
-# 存储执行进度
-python ./interpreter/state_index.py <output_dir> set exec.wave 2
-python ./interpreter/state_index.py <output_dir> set exec.status in_progress
+# 全景图：wave 进度、节点状态、生成物
+python ./interpreter/state_index.py <output_dir>
 
-# 记录 SubAgent 产生的资源
-python ./interpreter/state_index.py <output_dir> set resources.doc_token "V1Pq..."
-python ./interpreter/state_index.py <output_dir> push resources.sheet_tokens "shtAAAA"
-python ./interpreter/state_index.py <output_dir> push resources.sheet_tokens "shtBBBB"
+# 查看某个节点的详细输出
+python ./interpreter/state_index.py <output_dir> --node summary-2-2
 
-# 记录错误
-python ./interpreter/state_index.py <output_dir> incr errors.count
-python ./interpreter/state_index.py <output_dir> push errors.log "timeout on summary-2-2"
-
-# 查询
-python ./interpreter/state_index.py <output_dir> keys resources.*   # 所有 resources 下的 key
-python ./interpreter/state_index.py <output_dir> snapshot            # 完整快照
-python ./interpreter/state_index.py <output_dir> log                 # 最近变更历史
-
-# 恢复上下文后快速找回所有状态
-python ./interpreter/state_index.py <output_dir> snapshot
+# 按 wave 或状态过滤
+python ./interpreter/state_index.py <output_dir> --wave 2
+python ./interpreter/state_index.py <output_dir> --status pending
 ```
 
-`execution_state.py` 负责 workflow 执行状态机（wave 推进/回退），`state_index.py` 负责任意状态的读写索引。两者互补，共用一个 session 目录。
+无需手动记录——脚本自动读取 `build_plan.json`、`execution_state.yaml` 和文件系统，合成统一的索引视图。输出示例：
+
+```json
+{
+  "summary": {
+    "session": "feishu-report-8",
+    "workflow": "feishu-sales-report",
+    "status": "in_progress",
+    "current_wave": 2,
+    "completed": 4,
+    "total": 7,
+    "pending_nodes": ["summary-3-2"]
+  },
+  "waves": [
+    {"wave": 0, "status": "completed", "nodes": [...]},
+    {"wave": 1, "status": "completed", "nodes": [...]},
+    {"wave": 2, "status": "in_progress", "nodes": [...]}
+  ],
+  "artifacts": {
+    "ir": "output/feishu-report-8/_ir.yaml",
+    "agent_outputs": {
+      "summary-2-2": "output/feishu-report-8/agents/summary-2-2/result.md"
+    }
+  }
+}
+```
+
+`execution_state.py` 负责 workflow 执行状态机（wave 推进/回退），`state_index.py` 负责只读索引整个 session 的全部状态。
 
 ### 回退工作流
 

@@ -1,225 +1,247 @@
 #!/usr/bin/env python3
 """
-State index — general-purpose key-value state store for workflow execution.
+State index — read-only index of current execution state.
 
-Main Agent uses this to track arbitrary state across context compressions:
-wave progress, generated resource tokens, error counts, file paths, etc.
-
-Storage: <session_dir>/state_index.json
+Auto-discovers wave progress, node results, and artifacts from a session
+directory. Main Agent uses this after context compression to restore position.
 
 Usage:
-    python state_index.py <session_dir> <action> [args]
+    python state_index.py <session_dir> [--node <id>] [--wave <n>] [--status <s>]
 
-Actions:
-    set <key> <value>          Store a value (JSON-decoded if possible)
-    get <key>                  Print value (exit 1 if not found)
-    delete <key>               Remove a key
-    push <key> <value>         Append to a list at key (creates if missing)
-    list <key>                 Print list items (one per line)
-    incr <key> [step]          Increment numeric value (default step=1)
-    keys [glob]                List keys matching glob (default: *)
-    snapshot                   Dump all key-value pairs as JSON
-    log [limit]                Show last N state changes (default: 20)
-    info                       Print stats (key count, file size, modified keys)
+Without flags: full state snapshot.
+  --node <id>   Show details for a specific node (stdout result, exit code)
+  --wave <n>    Show all nodes in a specific wave
+  --status <s>  Filter nodes by status (completed/pending/failed)
 """
 import json
 import os
 import sys
-import datetime
 from pathlib import Path
 
-INDEX_FILE = "state_index.json"
+
+def find_session_dir(raw: str) -> Path:
+    """Resolve session dir from name or path."""
+    p = Path(raw)
+    if p.exists() and p.is_dir():
+        return p.resolve()
+    # Try under ./output/
+    candidate = Path("./output") / raw
+    if candidate.exists():
+        return candidate.resolve()
+    candidate = Path(".") / raw
+    if candidate.exists():
+        return candidate.resolve()
+    print(f"Session directory not found: {raw}", file=sys.stderr)
+    sys.exit(1)
 
 
-def _load(session_dir: Path) -> dict:
-    path = session_dir / INDEX_FILE
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {"data": {}, "log": []}
-    return {"data": {}, "log": []}
-
-
-def _save(session_dir: Path, idx: dict):
-    path = session_dir / INDEX_FILE
-    path.write_text(json.dumps(idx, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
-def _log(idx: dict, action: str, key: str, value):
-    idx.setdefault("log", []).append({
-        "ts": datetime.datetime.now().isoformat(),
-        "action": action,
-        "key": key,
-        "value": value,
-    })
-    # Keep log bounded: last 5000 entries
-    if len(idx["log"]) > 5000:
-        idx["log"] = idx["log"][-5000:]
-
-
-def _parse_value(s: str):
-    """Try JSON decode, fallback to raw string."""
-    if not s:
-        return s
+def read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
     try:
-        return json.loads(s)
-    except (json.JSONDecodeError, ValueError):
-        return s
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
-def _format_value(v) -> str:
-    if isinstance(v, str):
-        return v
-    return json.dumps(v, ensure_ascii=False)
+def index_session(session_dir: Path) -> dict:
+    plan = read_json(session_dir / "build_plan.json")
+    state = None
+    try:
+        import yaml
+        state = yaml.safe_load((session_dir / "execution_state.yaml").read_text(encoding="utf-8"))
+    except Exception:
+        pass
 
+    if not plan:
+        return {"error": "build_plan.json not found"}
 
-def cmd_set(session_dir: Path, key: str, value_raw: str):
-    idx = _load(session_dir)
-    value = _parse_value(value_raw)
-    idx["data"][key] = value
-    _log(idx, "set", key, value)
-    _save(session_dir, idx)
+    wf = plan.get("workflow", {})
+    node_results = plan.get("nodes", {})
+    execution_order = plan.get("execution_order", [])
+    waves = plan.get("waves", [])
+    failed = plan.get("failed_nodes", [])
+    skipped = plan.get("skipped_nodes", [])
 
+    # Build per-node index
+    nodes_index = {}
+    for entry in execution_order:
+        nid = entry["id"]
+        nr = node_results.get(nid, {})
+        nodes_index[nid] = {
+            "id": nid,
+            "type": entry.get("type", "unknown"),
+            "status": nr.get("status", "unknown"),
+            "wave": entry.get("wave", -1),
+            "has_result": (session_dir / "nodes" / nid / "result").exists(),
+            "has_agent_dir": (session_dir / "agents" / nid).exists(),
+        }
 
-def cmd_get(session_dir: Path, key: str):
-    idx = _load(session_dir)
-    val = idx.get("data", {}).get(key)
-    if val is None:
-        print(f"Key not found: {key}", file=sys.stderr)
-        sys.exit(1)
-    print(_format_value(val))
+    # Wave index
+    wave_index = []
+    for i, w in enumerate(waves):
+        wave_nodes = []
+        all_completed = True
+        for nid in w:
+            info = nodes_index.get(nid, {"id": nid, "status": "unknown"})
+            wave_nodes.append(info)
+            if info["status"] != "completed":
+                all_completed = False
+        wave_status = "completed" if all_completed else "in_progress"
+        if state and i < len(state.get("waves", [])):
+            wave_status = state["waves"][i].get("status", wave_status)
+        wave_index.append({
+            "wave": i,
+            "status": wave_status,
+            "node_count": len(w),
+            "nodes": wave_nodes,
+        })
 
+    # Artifact index
+    artifacts = {}
+    ir_path = session_dir / "_ir.yaml"
+    if ir_path.exists():
+        artifacts["ir"] = str(ir_path.resolve())
 
-def cmd_delete(session_dir: Path, key: str):
-    idx = _load(session_dir)
-    if key in idx.get("data", {}):
-        del idx["data"][key]
-        _log(idx, "delete", key, None)
-        _save(session_dir, idx)
+    agent_results = {}
+    agents_dir = session_dir / "agents"
+    if agents_dir.exists():
+        for agent_dir in sorted(agents_dir.iterdir()):
+            if agent_dir.is_dir():
+                result_file = agent_dir / "result.md"
+                if result_file.exists():
+                    agent_results[agent_dir.name] = str(result_file.resolve())
 
+    if agent_results:
+        artifacts["agent_outputs"] = agent_results
 
-def cmd_push(session_dir: Path, key: str, value_raw: str):
-    idx = _load(session_dir)
-    value = _parse_value(value_raw)
-    lst = idx["data"].setdefault(key, [])
-    if not isinstance(lst, list):
-        lst = [lst]
-    lst.append(value)
-    idx["data"][key] = lst
-    _log(idx, "push", key, value)
-    _save(session_dir, idx)
+    # Determine current position
+    current_wave = None
+    pending_nodes = []
+    completed_count = 0
+    total_count = 0
+    for ws in wave_index:
+        for ns in ws["nodes"]:
+            total_count += 1
+            if ns["status"] == "completed":
+                completed_count += 1
+            elif ns["status"] in ("pending", "unknown"):
+                if current_wave is None:
+                    current_wave = ws["wave"]
+                if ws["wave"] == current_wave:
+                    pending_nodes.append(ns["id"])
 
+    overall_status = "completed" if current_wave is None else "in_progress"
 
-def cmd_list(session_dir: Path, key: str):
-    idx = _load(session_dir)
-    val = idx.get("data", {}).get(key)
-    if val is None:
-        sys.exit(0)
-    if isinstance(val, list):
-        for item in val:
-            print(_format_value(item))
-    else:
-        print(_format_value(val))
-
-
-def cmd_incr(session_dir: Path, key: str, step_raw: str = "1"):
-    idx = _load(session_dir)
-    step = int(step_raw)
-    current = idx.get("data", {}).get(key, 0)
-    if not isinstance(current, (int, float)):
-        current = 0
-    new_val = current + step
-    idx["data"][key] = new_val
-    _log(idx, "incr", key, new_val)
-    _save(session_dir, idx)
-    print(new_val)
-
-
-def cmd_keys(session_dir: Path, pattern: str = "*"):
-    import fnmatch
-    idx = _load(session_dir)
-    keys = sorted(idx.get("data", {}).keys())
-    for k in keys:
-        if fnmatch.fnmatch(k, pattern):
-            print(k)
-
-
-def cmd_snapshot(session_dir: Path):
-    idx = _load(session_dir)
-    print(json.dumps(idx.get("data", {}), indent=2, ensure_ascii=False))
-
-
-def cmd_log(session_dir: Path, limit_raw: str = "20"):
-    idx = _load(session_dir)
-    limit = max(1, int(limit_raw))
-    entries = idx.get("log", [])
-    for entry in entries[-limit:]:
-        ts = entry.get("ts", "")
-        action = entry.get("action", "")
-        key = entry.get("key", "")
-        val = entry.get("value", "")
-        if isinstance(val, str):
-            val_preview = val[:80]
-        else:
-            val_preview = json.dumps(val, ensure_ascii=False)[:80]
-        print(f"{ts}  {action:8s}  {key} = {val_preview}")
-
-
-def cmd_info(session_dir: Path):
-    idx = _load(session_dir)
-    data = idx.get("data", {})
-    log = idx.get("log", [])
-    path = session_dir / INDEX_FILE
-    size = path.stat().st_size if path.exists() else 0
-    info = {
-        "key_count": len(data),
-        "file_size": size,
-        "log_entries": len(log),
-        "recent_keys": sorted(data.keys())[-20:],
+    summary = {
+        "session": session_dir.name,
+        "workflow": wf.get("name", "unknown"),
+        "mode": wf.get("mode", "static"),
+        "status": overall_status,
+        "wave_count": len(wave_index),
+        "current_wave": current_wave,
+        "completed": completed_count,
+        "total": total_count,
+        "pending_nodes": pending_nodes,
     }
+    if failed:
+        summary["failed_nodes"] = [
+            {"id": f["id"], "error": f.get("error", "")} for f in failed
+        ]
+    if skipped:
+        summary["skipped_nodes"] = skipped
+
+    result = {
+        "summary": summary,
+        "waves": wave_index,
+        "artifacts": artifacts,
+    }
+
+    return result
+
+
+def show_node(session_dir: Path, node_id: str):
+    """Show detailed info for a single node: result, exit code, stderr."""
+    info = {"id": node_id}
+
+    result_file = session_dir / "nodes" / node_id / "result"
+    if result_file.exists():
+        content = result_file.read_text(encoding="utf-8")
+        plan = read_json(session_dir / "build_plan.json")
+        status = "unknown"
+        if plan:
+            nr = plan.get("nodes", {}).get(node_id, {})
+            status = nr.get("status", "unknown")
+        info["status"] = status
+        info["result"] = content[:2000]  # Cap display size
+        info["result_length"] = len(content)
+    else:
+        info["status"] = "not_found"
+
+    exit_file = session_dir / "nodes" / node_id / "exit_code"
+    if exit_file.exists():
+        info["exit_code"] = int(exit_file.read_text().strip())
+
+    stderr_file = session_dir / "nodes" / node_id / "stderr"
+    if stderr_file.exists():
+        info["stderr"] = stderr_file.read_text(encoding="utf-8")[:1000]
+
     print(json.dumps(info, indent=2, ensure_ascii=False))
 
 
 def main():
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
 
     session_dir = Path(sys.argv[1]).resolve()
-    action = sys.argv[2]
-
     if not session_dir.exists():
-        print(f"Session directory not found: {session_dir}", file=sys.stderr)
-        sys.exit(1)
+        session_dir = find_session_dir(sys.argv[1])
 
-    if action == "set" and len(sys.argv) >= 5:
-        cmd_set(session_dir, sys.argv[3], sys.argv[4])
-    elif action == "get" and len(sys.argv) >= 4:
-        cmd_get(session_dir, sys.argv[3])
-    elif action == "delete" and len(sys.argv) >= 4:
-        cmd_delete(session_dir, sys.argv[3])
-    elif action == "push" and len(sys.argv) >= 5:
-        cmd_push(session_dir, sys.argv[3], sys.argv[4])
-    elif action == "list" and len(sys.argv) >= 4:
-        cmd_list(session_dir, sys.argv[3])
-    elif action == "incr":
-        step = sys.argv[4] if len(sys.argv) >= 5 else "1"
-        cmd_incr(session_dir, sys.argv[3], step)
-    elif action == "keys":
-        pattern = sys.argv[3] if len(sys.argv) >= 4 else "*"
-        cmd_keys(session_dir, pattern)
-    elif action == "snapshot":
-        cmd_snapshot(session_dir)
-    elif action == "log":
-        limit = sys.argv[3] if len(sys.argv) >= 4 else "20"
-        cmd_log(session_dir, limit)
-    elif action == "info":
-        cmd_info(session_dir)
-    else:
-        print(f"Unknown action or missing args: {action}", file=sys.stderr)
-        print(__doc__, file=sys.stderr)
-        sys.exit(1)
+    # Parse optional flags
+    show_node_id = None
+    filter_wave = None
+    filter_status = None
+
+    args = sys.argv[2:]
+    i = 0
+    while i < len(args):
+        if args[i] == "--node" and i + 1 < len(args):
+            show_node_id = args[i + 1]
+            i += 2
+        elif args[i] == "--wave" and i + 1 < len(args):
+            filter_wave = int(args[i + 1])
+            i += 2
+        elif args[i] == "--status" and i + 1 < len(args):
+            filter_status = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    if show_node_id:
+        show_node(session_dir, show_node_id)
+        return
+
+    index = index_session(session_dir)
+
+    if filter_wave is not None:
+        for ws in index.get("waves", []):
+            if ws["wave"] == filter_wave:
+                print(json.dumps(ws, indent=2, ensure_ascii=False))
+                return
+        print(json.dumps({"error": f"wave {filter_wave} not found"}), ensure_ascii=False)
+        return
+
+    if filter_status:
+        matching = [
+            ns for ws in index.get("waves", [])
+            for ns in ws["nodes"]
+            if ns["status"] == filter_status
+        ]
+        print(json.dumps(matching, indent=2, ensure_ascii=False))
+        return
+
+    print(json.dumps(index, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
