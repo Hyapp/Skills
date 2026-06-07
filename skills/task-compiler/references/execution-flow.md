@@ -24,7 +24,7 @@
 2. 调用解释器：
 
 ```bash
-python interpreter/task_compiler.py <workflow.json> \
+python ./interpreter/task_compiler.py <workflow.json> \
   [--output-dir <dir>] [--session <name>] [--debug] [--clean]
 ```
 

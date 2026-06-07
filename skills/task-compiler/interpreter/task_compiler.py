@@ -9,7 +9,7 @@ Input:  JSON file (Agent converts YAML -> JSON before calling this)
 Output: build_plan.json + per-node result files + per-agent parameter files
 Flags:
     --agent-runtime <runtime>  Mark build_plan.json with the target agent platform.
-                               Supported: codex, trae.
+                               Supported: codex, trae, claude.
                                The interpreter does NOT execute agent nodes;
                                this field tells the main Agent which SubAgent
                                dispatch instructions to follow in Phase 3.
@@ -117,7 +117,7 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime codex|trae]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime codex|trae|claude]", file=sys.stderr)
         sys.exit(1)
 
     input_path = Path(sys.argv[1])
@@ -145,7 +145,7 @@ def main():
             agent_runtime = sys.argv[i + 1]
 
     # Validate agent_runtime
-    VALID_AGENT_RUNTIMES = {"codex", "trae"}
+    VALID_AGENT_RUNTIMES = {"codex", "trae", "claude"}
     if agent_runtime and agent_runtime not in VALID_AGENT_RUNTIMES:
         print(f"Error: invalid agent_runtime '{agent_runtime}'. Valid options: {', '.join(sorted(VALID_AGENT_RUNTIMES))}", file=sys.stderr)
         sys.exit(1)

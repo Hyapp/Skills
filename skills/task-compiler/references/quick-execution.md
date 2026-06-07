@@ -11,7 +11,7 @@
 
 示例：
 ```
-/task-compile workflows/feishu-sales-report.yaml
+/task-compile ./workflows/feishu-sales-report/workflow.yaml
 ```
 
 ## 标志
@@ -28,7 +28,7 @@
 ## 手动调用解释器
 
 ```bash
-python interpreter/task_compiler.py <workflow.json> \
+python ./interpreter/task_compiler.py <workflow.json> \
   [--output-dir ./output] [--session <name>] [--debug] [--clean]
 ```
 
@@ -36,4 +36,4 @@ YAML 文件会自动转换为同名的 `.json` 文件后传入解释器。
 
 ## 参考 workflow
 
-- `workflows/feishu-sales-report.yaml` — 创建飞书文档（内嵌电子表格 + 假数据 + 总结）
+- `./workflows/feishu-sales-report/workflow.yaml` — 创建飞书文档（内嵌电子表格 + 假数据 + 总结）

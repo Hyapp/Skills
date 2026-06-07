@@ -10,7 +10,7 @@ workflow:
   on_failure: abort          # abort | retry | pause
   max_retries: 3
   parallel: 1                # 并发数（默认 1 = 串行），控制同一 wave 内的 agent 节点并行度
-  agent_runtime: codex # codex（默认）| trae，指定 SubAgent 使用的模型运行时
+  agent_runtime: codex # codex（默认）| trae | claude，指定 SubAgent 使用的模型运行时
   variables:                 # 可选，有默认值直接确认，无默认值向用户询问
     target: "默认值"
     search_query:
@@ -48,7 +48,7 @@ workflow:
 | `on_failure` | string | `abort` | `abort`、`retry`、`pause` |
 | `max_retries` | int | `3` | 重试次数 |
 | `parallel` | int | `1` | 并发数，控制同一 wave 内的 agent 节点并行度 |
-| `agent_runtime` | string | `codex` | SubAgent 使用的模型运行时：`codex`、`trae` |
+| `agent_runtime` | string | `codex` | SubAgent 使用的模型运行时：`codex`（默认）、`trae`、`claude` |
 | `variables` | dict | - | 工作流变量定义 |
 
 ### 通用字段（所有节点类型共用）

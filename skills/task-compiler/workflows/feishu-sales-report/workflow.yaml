@@ -9,13 +9,13 @@ workflow:
       type: program
       description: 生成产品销售假数据
       capture: sales_data
-      command: python workflows/feishu-sales-report/generate_data.py
+      command: python ./workflows/feishu-sales-report/generate_data.py
 
     - id: generate-data-2
       type: program
       description: 生成区域客户假数据
       capture: customer_data
-      command: python workflows/feishu-sales-report/generate_data_v2.py
+      command: python ./workflows/feishu-sales-report/generate_data_v2.py
 
     # ── Wave 1: IR 骨架构建（纯数据，无 lark-cli）──
     - id: build-ir
@@ -26,7 +26,7 @@ workflow:
         - generate-data-1
         - generate-data-2
       command: >
-        python workflows/feishu-sales-report/build_ir.py
+        python ./workflows/feishu-sales-report/build_ir.py
         --output-dir output/feishu-report-8
         --result1 output/feishu-report-8/nodes/generate-data-1/result
         --result2 output/feishu-report-8/nodes/generate-data-2/result
