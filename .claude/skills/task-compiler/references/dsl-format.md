@@ -10,6 +10,7 @@ workflow:
   on_failure: abort          # abort | retry | pause
   max_retries: 3
   parallel: 1                # 并发数（默认 1 = 串行），控制同一 wave 内的 agent 节点并行度
+  agent_runtime: claude-code # claude-code（默认）| codex | trae，指定 SubAgent 使用的模型运行时
   variables:                 # 可选，有默认值直接确认，无默认值向用户询问
     target: "默认值"
     search_query:
@@ -36,6 +37,19 @@ workflow:
 | `text` | 展开 `{{ }}` 模板，输出文本 |
 | `agent` | 启动 SubAgent 执行复杂任务 |
 | `plugin` | 引用已注册 plugin（如 render-feishu），在 Phase 3 执行。解释器在 Phase 2 验证 plugin 存在并准备参数，状态置为 pending |
+
+## workflow 级别字段说明
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `name` | string | - | **必填**。workflow 名称 |
+| `description` | string | - | 可选描述 |
+| `mode` | string | `static` | `static` 或 `dynamic` |
+| `on_failure` | string | `abort` | `abort`、`retry`、`pause` |
+| `max_retries` | int | `3` | 重试次数 |
+| `parallel` | int | `1` | 并发数，控制同一 wave 内的 agent 节点并行度 |
+| `agent_runtime` | string | `claude-code` | SubAgent 使用的模型运行时：`claude-code`、`codex`、`trae` |
+| `variables` | dict | - | 工作流变量定义 |
 
 ### 通用字段（所有节点类型共用）
 
