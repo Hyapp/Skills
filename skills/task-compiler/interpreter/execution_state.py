@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
+[DEPRECATED] Use state_index.py instead — it's the unified replacement.
+
 Execution state management — deterministic state machine for workflow execution.
+Kept for backward compatibility; delegates to state_index.py internally.
 
 Usage:
     python execution_state.py <session_dir> <action> [options]
-
-Actions:
-    init                     Create execution_state.yaml from build_plan.json
-    status                   Print current wave, pending nodes, next action
-    wave-complete            Mark current wave done, advance, output next dispatch
-    rollback <wave_index>    Roll back to given wave, list nodes to re-run
 """
 import json
 import os

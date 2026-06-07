@@ -1,36 +1,68 @@
 #!/usr/bin/env python3
 """
-State index — read-only index of current execution state.
+State index — unified state management for workflow execution.
 
-Auto-discovers wave progress, node results, and artifacts from a session
-directory. Main Agent uses this after context compression to restore position.
+Read: auto-discovers wave progress, node results, and artifacts from session dir.
+Write: supports dispatch, wave-complete, rollback for state transitions.
 
 Usage:
-    python state_index.py <session_dir> [--node <id>] [--wave <n>] [--status <s>]
-
-Without flags: full state snapshot.
-  --node <id>   Show details for a specific node (stdout result, exit code)
-  --wave <n>    Show all nodes in a specific wave
-  --status <s>  Filter nodes by status (completed/pending/failed)
+    python state_index.py <session_dir>                   # Full snapshot
+    python state_index.py <session_dir> status            # Compact status
+    python state_index.py <session_dir> --node <id>       # Node detail
+    python state_index.py <session_dir> --wave <n>        # Wave detail
+    python state_index.py <session_dir> --status <s>      # Filter by status
+    python state_index.py <session_dir> dispatch <ids>    # Mark nodes dispatched
+    python state_index.py <session_dir> wave-complete     # Advance to next wave
+    python state_index.py <session_dir> rollback <wave>   # Roll back to wave
 """
 import json
 import os
 import sys
 from pathlib import Path
 
+STATE_FILE = "execution_state.yaml"
+
+
+# ── Helpers ──
+
+def read_build_plan(session_dir: Path) -> dict:
+    path = session_dir / "build_plan.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def read_state(session_dir: Path) -> dict | None:
+    path = session_dir / STATE_FILE
+    if not path.exists():
+        return None
+    import yaml
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def write_state(session_dir: Path, state: dict):
+    import yaml
+    path = session_dir / STATE_FILE
+    path.write_text(
+        yaml.dump(state, allow_unicode=True, default_flow_style=None, sort_keys=False),
+        encoding="utf-8",
+    )
+
 
 def find_session_dir(raw: str) -> Path:
-    """Resolve session dir from name or path."""
     p = Path(raw)
     if p.exists() and p.is_dir():
         return p.resolve()
-    # Try under ./output/
-    candidate = Path("./output") / raw
-    if candidate.exists():
-        return candidate.resolve()
-    candidate = Path(".") / raw
-    if candidate.exists():
-        return candidate.resolve()
+    for base in [Path("./output"), Path(".")]:
+        candidate = base / raw
+        if candidate.exists():
+            return candidate.resolve()
     print(f"Session directory not found: {raw}", file=sys.stderr)
     sys.exit(1)
 
@@ -44,14 +76,11 @@ def read_json(path: Path) -> dict | None:
         return None
 
 
+# ── Index (read) ──
+
 def index_session(session_dir: Path) -> dict:
-    plan = read_json(session_dir / "build_plan.json")
-    state = None
-    try:
-        import yaml
-        state = yaml.safe_load((session_dir / "execution_state.yaml").read_text(encoding="utf-8"))
-    except Exception:
-        pass
+    plan = read_build_plan(session_dir)
+    state = read_state(session_dir)
 
     if not plan:
         return {"error": "build_plan.json not found"}
@@ -63,7 +92,6 @@ def index_session(session_dir: Path) -> dict:
     failed = plan.get("failed_nodes", [])
     skipped = plan.get("skipped_nodes", [])
 
-    # Build per-node index
     nodes_index = {}
     for entry in execution_order:
         nid = entry["id"]
@@ -77,19 +105,15 @@ def index_session(session_dir: Path) -> dict:
             "has_agent_dir": (session_dir / "agents" / nid).exists(),
         }
 
-    # Wave index
     wave_index = []
     for i, w in enumerate(waves):
-        wave_nodes = []
-        all_completed = True
-        for nid in w:
-            info = nodes_index.get(nid, {"id": nid, "status": "unknown"})
-            wave_nodes.append(info)
-            if info["status"] != "completed":
-                all_completed = False
+        wave_nodes = [nodes_index.get(nid, {"id": nid, "status": "unknown"}) for nid in w]
+        all_completed = all(ns["status"] == "completed" for ns in wave_nodes)
+
         wave_status = "completed" if all_completed else "in_progress"
         if state and i < len(state.get("waves", [])):
             wave_status = state["waves"][i].get("status", wave_status)
+
         wave_index.append({
             "wave": i,
             "status": wave_status,
@@ -97,25 +121,22 @@ def index_session(session_dir: Path) -> dict:
             "nodes": wave_nodes,
         })
 
-    # Artifact index
     artifacts = {}
     ir_path = session_dir / "_ir.yaml"
     if ir_path.exists():
         artifacts["ir"] = str(ir_path.resolve())
 
-    agent_results = {}
     agents_dir = session_dir / "agents"
     if agents_dir.exists():
-        for agent_dir in sorted(agents_dir.iterdir()):
-            if agent_dir.is_dir():
-                result_file = agent_dir / "result.md"
-                if result_file.exists():
-                    agent_results[agent_dir.name] = str(result_file.resolve())
+        agent_outputs = {}
+        for ad in sorted(agents_dir.iterdir()):
+            if ad.is_dir():
+                rf = ad / "result.md"
+                if rf.exists():
+                    agent_outputs[ad.name] = str(rf.resolve())
+        if agent_outputs:
+            artifacts["agent_outputs"] = agent_outputs
 
-    if agent_results:
-        artifacts["agent_outputs"] = agent_results
-
-    # Determine current position
     current_wave = None
     pending_nodes = []
     completed_count = 0
@@ -145,49 +166,229 @@ def index_session(session_dir: Path) -> dict:
         "pending_nodes": pending_nodes,
     }
     if failed:
-        summary["failed_nodes"] = [
-            {"id": f["id"], "error": f.get("error", "")} for f in failed
-        ]
+        summary["failed_nodes"] = [{"id": f["id"], "error": f.get("error", "")} for f in failed]
     if skipped:
         summary["skipped_nodes"] = skipped
 
-    result = {
-        "summary": summary,
-        "waves": wave_index,
-        "artifacts": artifacts,
-    }
+    return {"summary": summary, "waves": wave_index, "artifacts": artifacts}
 
-    return result
+
+# ── Mutations ──
+
+def cmd_init(session_dir: Path):
+    """Create execution_state.yaml from build_plan.json."""
+    plan = read_build_plan(session_dir)
+    if not plan:
+        print("build_plan.json not found or empty", file=sys.stderr)
+        sys.exit(1)
+
+    waves = plan.get("waves", [])
+    execution_order = plan.get("execution_order", [])
+    node_index = {e["id"]: e for e in execution_order}
+    node_results = plan.get("nodes", {})
+
+    wave_states = []
+    for w in waves:
+        node_states = []
+        for nid in w:
+            nr = node_results.get(nid, {})
+            ns = nr.get("status", "pending")
+            if ns not in ("completed", "failed"):
+                ns = "pending"
+            node_states.append({
+                "id": nid,
+                "type": node_index.get(nid, {}).get("type", "unknown"),
+                "status": ns,
+            })
+        ws_status = "completed" if all(ns["status"] == "completed" for ns in node_states) else "pending"
+        wave_states.append({
+            "wave": len(wave_states),
+            "status": ws_status,
+            "nodes": node_states,
+        })
+
+    state = {
+        "workflow": plan.get("workflow", {}).get("name", "unknown"),
+        "mode": plan.get("workflow", {}).get("mode", "static"),
+        "failed_nodes": plan.get("failed_nodes", []),
+        "skipped_nodes": plan.get("skipped_nodes", []),
+        "waves": wave_states,
+    }
+    write_state(session_dir, state)
+    print(json.dumps({"status": "ok", "action": "init"}))
+
+
+def cmd_status(session_dir: Path):
+    """Print compact execution status."""
+    index = index_session(session_dir)
+    s = index.get("summary", {})
+    pending = s.get("pending_nodes", [])
+    cw = s.get("current_wave")
+
+    if cw is None:
+        next_action = "all-complete"
+    elif pending:
+        next_action = f"dispatch: {', '.join(pending)} (wave {cw})"
+    else:
+        next_action = f"await: wave {cw} in progress"
+
+    output = {
+        "session": s.get("session"),
+        "workflow": s.get("workflow"),
+        "status": s.get("status"),
+        "current_wave": cw,
+        "completed": s.get("completed"),
+        "total": s.get("total"),
+        "pending_nodes": pending,
+        "next_action": next_action,
+    }
+    for field in ("failed_nodes", "skipped_nodes"):
+        if s.get(field):
+            output[field] = s[field]
+
+    print(json.dumps(output, ensure_ascii=False))
 
 
 def show_node(session_dir: Path, node_id: str):
-    """Show detailed info for a single node: result, exit code, stderr."""
+    """Show detailed info for a single node."""
     info = {"id": node_id}
-
     result_file = session_dir / "nodes" / node_id / "result"
     if result_file.exists():
         content = result_file.read_text(encoding="utf-8")
         plan = read_json(session_dir / "build_plan.json")
         status = "unknown"
         if plan:
-            nr = plan.get("nodes", {}).get(node_id, {})
-            status = nr.get("status", "unknown")
+            status = plan.get("nodes", {}).get(node_id, {}).get("status", "unknown")
         info["status"] = status
-        info["result"] = content[:2000]  # Cap display size
+        info["result_preview"] = content[:2000]
         info["result_length"] = len(content)
     else:
         info["status"] = "not_found"
 
-    exit_file = session_dir / "nodes" / node_id / "exit_code"
-    if exit_file.exists():
-        info["exit_code"] = int(exit_file.read_text().strip())
-
-    stderr_file = session_dir / "nodes" / node_id / "stderr"
-    if stderr_file.exists():
-        info["stderr"] = stderr_file.read_text(encoding="utf-8")[:1000]
+    for name in ("exit_code", "stderr"):
+        pf = session_dir / "nodes" / node_id / name
+        if pf.exists():
+            info[name] = pf.read_text(encoding="utf-8")[:1000]
 
     print(json.dumps(info, indent=2, ensure_ascii=False))
 
+
+def cmd_dispatch(session_dir: Path, node_ids: list[str]):
+    """Mark nodes as dispatched (running)."""
+    state = read_state(session_dir)
+    if not state:
+        print("No state found. Run 'init' first.", file=sys.stderr)
+        sys.exit(1)
+
+    marked = []
+    for ws in state["waves"]:
+        for ns in ws["nodes"]:
+            if ns["id"] in node_ids and ns["status"] == "pending":
+                ns["status"] = "dispatched"
+                marked.append(ns["id"])
+        if any(ns["id"] in node_ids and ns["status"] == "dispatched" for ns in ws["nodes"]):
+            if ws["status"] == "pending":
+                ws["status"] = "in_progress"
+
+    write_state(session_dir, state)
+    print(json.dumps({"action": "dispatch", "dispatched": marked}))
+
+
+def cmd_wave_complete(session_dir: Path):
+    """Mark current wave as complete and advance."""
+    state = read_state(session_dir)
+    if not state:
+        print("No state found. Run 'init' first.", file=sys.stderr)
+        sys.exit(1)
+
+    # Find first wave that is in_progress or has dispatched nodes
+    found = False
+    for ws in state["waves"]:
+        statuses = {ns["status"] for ns in ws["nodes"]}
+        if ws["status"] == "in_progress" or "dispatched" in statuses or "running" in statuses:
+            for ns in ws["nodes"]:
+                if ns["status"] in ("dispatched", "running", "in_progress"):
+                    ns["status"] = "completed"
+            ws["status"] = "completed"
+            found = True
+            break
+
+    if not found:
+        # No active wave — complete the first pending one
+        for ws in state["waves"]:
+            if ws["status"] == "pending":
+                for ns in ws["nodes"]:
+                    ns["status"] = "completed"
+                ws["status"] = "completed"
+                found = True
+                break
+
+    if not found:
+        all_done = all(ws["status"] == "completed" for ws in state["waves"])
+        print(json.dumps({
+            "action": "wave-complete",
+            "status": "all-complete" if all_done else "nothing-to-advance",
+        }))
+        if all_done:
+            write_state(session_dir, state)
+        sys.exit(0 if all_done else 1)
+
+    # Ensure earlier waves are marked completed
+    for ws in state["waves"]:
+        if ws["status"] == "completed":
+            for ns in ws["nodes"]:
+                if ns["status"] == "pending":
+                    ns["status"] = "completed"
+
+    write_state(session_dir, state)
+
+    index = index_session(session_dir)
+    s = index.get("summary", {})
+    pending = s.get("pending_nodes", [])
+    cw = s.get("current_wave")
+
+    output = {
+        "action": "wave-complete",
+        "status": "in_progress",
+        "current_wave": cw,
+        "pending_nodes": pending,
+        "next_action": f"dispatch: {', '.join(pending)} (wave {cw})" if pending else "await completed",
+    }
+    print(json.dumps(output, ensure_ascii=False))
+
+
+def cmd_rollback(session_dir: Path, target_wave: int):
+    """Roll back to target wave, resetting all later waves."""
+    state = read_state(session_dir)
+    if not state:
+        print("No state found. Run 'init' first.", file=sys.stderr)
+        sys.exit(1)
+
+    waves = state["waves"]
+    if target_wave < 0 or target_wave >= len(waves):
+        print(f"Invalid wave index {target_wave}. Valid: 0-{len(waves) - 1}", file=sys.stderr)
+        sys.exit(1)
+
+    affected = []
+    for ws in waves:
+        if ws["wave"] >= target_wave:
+            ws["status"] = "pending" if ws["wave"] == target_wave else "pending"
+            for ns in ws["nodes"]:
+                if ns["status"] in ("completed", "dispatched", "running", "in_progress"):
+                    ns["status"] = "pending"
+                    affected.append(ns["id"])
+
+    write_state(session_dir, state)
+
+    print(json.dumps({
+        "action": "rollback",
+        "target_wave": target_wave,
+        "affected_nodes": affected,
+        "next_action": f"re-dispatch wave {target_wave}: {', '.join(affected)}" if affected else f"no nodes to re-run at wave {target_wave}",
+    }, ensure_ascii=False))
+
+
+# ── Main ──
 
 def main():
     if len(sys.argv) < 2:
@@ -198,7 +399,9 @@ def main():
     if not session_dir.exists():
         session_dir = find_session_dir(sys.argv[1])
 
-    # Parse optional flags
+    # Parse action and flags
+    action = None
+    action_args = []
     show_node_id = None
     filter_wave = None
     filter_status = None
@@ -215,16 +418,23 @@ def main():
         elif args[i] == "--status" and i + 1 < len(args):
             filter_status = args[i + 1]
             i += 2
+        elif args[i] in ("init", "status", "wave-complete"):
+            action = args[i]
+            i += 1
+        elif args[i] in ("dispatch", "rollback"):
+            action = args[i]
+            action_args = args[i + 1:]
+            break
         else:
             i += 1
 
+    # Route to action
     if show_node_id:
         show_node(session_dir, show_node_id)
         return
 
-    index = index_session(session_dir)
-
     if filter_wave is not None:
+        index = index_session(session_dir)
         for ws in index.get("waves", []):
             if ws["wave"] == filter_wave:
                 print(json.dumps(ws, indent=2, ensure_ascii=False))
@@ -233,15 +443,27 @@ def main():
         return
 
     if filter_status:
-        matching = [
-            ns for ws in index.get("waves", [])
-            for ns in ws["nodes"]
-            if ns["status"] == filter_status
-        ]
+        index = index_session(session_dir)
+        matching = [ns for ws in index.get("waves", []) for ns in ws["nodes"] if ns["status"] == filter_status]
         print(json.dumps(matching, indent=2, ensure_ascii=False))
         return
 
-    print(json.dumps(index, indent=2, ensure_ascii=False))
+    if action == "init":
+        cmd_init(session_dir)
+    elif action == "status":
+        cmd_status(session_dir)
+    elif action == "dispatch":
+        cmd_dispatch(session_dir, action_args)
+    elif action == "wave-complete":
+        cmd_wave_complete(session_dir)
+    elif action == "rollback":
+        if not action_args:
+            print("Usage: state_index.py <session_dir> rollback <wave_index>", file=sys.stderr)
+            sys.exit(1)
+        cmd_rollback(session_dir, int(action_args[0]))
+    else:
+        # Default: full snapshot
+        print(json.dumps(index_session(session_dir), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

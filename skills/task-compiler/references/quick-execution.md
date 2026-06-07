@@ -41,7 +41,7 @@ YAML 文件会自动转换为同名的 `.json` 文件后传入解释器。
 解释器运行后使用 state hook 初始化执行状态：
 
 ```bash
-python ./interpreter/execution_state.py ./output/<session> init
+python ./interpreter/state_index.py ./output/<session> init
 ```
 
 ## 上下文恢复
@@ -50,7 +50,7 @@ python ./interpreter/execution_state.py ./output/<session> init
 
 ```bash
 # 当前 wave 和下一步
-python ./interpreter/execution_state.py ./output/<session> status
+python ./interpreter/state_index.py ./output/<session> status
 
 # 完整的 session 索引（wave 进度、节点状态、生成物）
 python ./interpreter/state_index.py ./output/<session>
