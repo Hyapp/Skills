@@ -194,6 +194,10 @@ def prepare_agent(node: dict, context: dict, output_dir: Path, id_map_local: dic
     }
     if from_all_outputs:
         context_data["from_all_outputs"] = from_all_outputs
+    if output_validate:
+        output_files = agent_params.get("output", {}).get("files", [])
+        if output_files:
+            context_data["output_files"] = output_files
     (agent_dir / "context.json").write_text(
         json.dumps(context_data, indent=2, ensure_ascii=False), encoding="utf-8"
     )

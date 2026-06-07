@@ -57,8 +57,7 @@ workflow:
         - 产品间对比分析
         - 数据洞察
 
-        输出格式（只输出 JSON，不要包含其他文字）：
-        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+        将结果以 Markdown 格式写入 context.json 中 output_files 指定的文件。
 
     - id: summary-3-2
       type: agent
@@ -85,8 +84,7 @@ workflow:
         - 季度趋势
         - 数据洞察和建议
 
-        输出格式（只输出 JSON，不要包含其他文字）：
-        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+        将结果以 Markdown 格式写入 context.json 中 output_files 指定的文件。
 
     # ── Wave 3: Agent 生成最终总结 ──
     - id: summary-1
@@ -103,10 +101,8 @@ workflow:
         生成报告最终的「1. 总结」章节。
 
         ## 输入数据
-        从 context.json 的 input_sources 中找到：
-        - summary-2-2 的输出（JSON，含 text 字段）
-        - summary-3-2 的输出（JSON，含 text 字段）
-
+        读取 summary-2-2 和 summary-3-2 的输出文件（result.md）获取两份子总结内容。
+        文件路径规则：`<output-dir>/agents/<node-id>/result.md`。
         ## 输出要求
         撰写 300-500 字的综合性报告总结，覆盖：
         - 两组数据的核心发现
@@ -114,8 +110,7 @@ workflow:
         - 关键指标总结
         - 业务洞察和建议
 
-        输出格式（只输出 JSON，不要包含其他文字）：
-        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+        将结果以 Markdown 格式写入 context.json 中 output_files 指定的文件。
 
     # ── Post-Phase-3: 渲染为飞书文档 ──
     - id: render-doc
