@@ -9,9 +9,13 @@ Usage:
 Output: IR YAML 写入 <output_dir>/_ir.yaml
 Render-order pragma 的 path 相对 output-dir 构造，render 时解析。
 """
-import json, sys
+import json, sys, os
 from pathlib import Path
 import yaml
+
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 
 
 def parse_args():
