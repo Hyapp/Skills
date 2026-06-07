@@ -15,7 +15,8 @@ Usage:
     python state_index.py <session_dir> --status <s>      # Filter by status
     python state_index.py <session_dir> dispatch <ids>    # Mark nodes dispatched
     python state_index.py <session_dir> wave-complete     # Advance to next wave
-    python state_index.py <session_dir> rollback <wave>   # Roll back to wave
+    python state_index.py <session_dir> rollback <wave>   # Roll back to specific wave
+    python state_index.py <session_dir> rollback          # Default: one wave back
 """
 import json
 import os
@@ -362,7 +363,8 @@ def cmd_wave_complete(session_dir: Path):
 
 def cmd_rollback(session_dir: Path, target_wave: int):
     """Roll back to target wave, resetting all later waves.
-    Idempotent nodes (idempotent=true in DSL) keep their completed status."""
+    Idempotent nodes (idempotent=true in DSL) keep their completed status.
+    target_wave=-1 auto-computes current_wave - 1 (Markov: only need one layer back)."""
     state = read_state(session_dir)
     if not state:
         print("No state found. Run 'init' first.", file=sys.stderr)
@@ -376,6 +378,13 @@ def cmd_rollback(session_dir: Path, target_wave: int):
             idempotent_nodes.add(entry["id"])
 
     waves = state["waves"]
+
+    # Auto: one wave back from current
+    if target_wave < 0:
+        index = index_session(session_dir)
+        cw = index.get("summary", {}).get("current_wave")
+        target_wave = max(0, cw - 1) if cw is not None else 0
+
     if target_wave < 0 or target_wave >= len(waves):
         print(f"Invalid wave index {target_wave}. Valid: 0-{len(waves) - 1}", file=sys.stderr)
         sys.exit(1)
@@ -443,8 +452,16 @@ def main():
         elif args[i] in ("init", "status", "wave-complete"):
             action = args[i]
             i += 1
-        elif args[i] in ("dispatch", "rollback"):
-            action = args[i]
+        elif args[i] == "rollback":
+            action = "rollback"
+            if i + 1 < len(args) and args[i + 1].lstrip("-").isdigit():
+                action_args = [args[i + 1]]
+                i += 2
+            else:
+                action_args = []
+                i += 1
+        elif args[i] == "dispatch":
+            action = "dispatch"
             action_args = args[i + 1:]
             break
         else:
@@ -478,10 +495,8 @@ def main():
     elif action == "wave-complete":
         cmd_wave_complete(session_dir)
     elif action == "rollback":
-        if not action_args:
-            print("Usage: state_index.py <session_dir> rollback <wave_index>", file=sys.stderr)
-            sys.exit(1)
-        cmd_rollback(session_dir, int(action_args[0]))
+        target = int(action_args[0]) if action_args else -1  # -1 = auto (one wave back)
+        cmd_rollback(session_dir, target)
     else:
         out(index_session(session_dir))
 

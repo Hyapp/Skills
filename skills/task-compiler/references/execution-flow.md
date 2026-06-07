@@ -185,8 +185,13 @@ python ./interpreter/state_index.py <output_dir> --node summary-2-2
 
 当执行到 wave N 发现问题时：
 
+每层 wave 只依赖上一层（马尔可夫过程），默认退一层即可：
+
 ```bash
-# 回退到 wave M（M < N）
+# 默认退一层
+python ./interpreter/state_index.py <output_dir> rollback
+
+# 或指定目标 wave
 python ./interpreter/state_index.py <output_dir> rollback 1
 ```
 
