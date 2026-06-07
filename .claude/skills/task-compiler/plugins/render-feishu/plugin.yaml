@@ -1,0 +1,76 @@
+name: render-feishu
+version: 1
+description: IR → 飞书云文档渲染器
+
+execute:
+  command: python {plugin_dir}/render.py {input_ir}
+  input:
+    input_ir:
+      type: file
+      description: "完整 IR JSON 文件路径"
+  output:
+    type: stdout
+    format: json
+
+ir:
+  media_type: application/vnd.feishu-doc-ir
+  format: yaml
+
+  # context 存放所有跨块共享的数据池
+  context:
+    sheets:
+      description: "电子表格数据池，被 type=sheet 的 sheet_ref 引用"
+      type: object
+      additional_properties:
+        type: object
+        required: [headers, rows]
+        properties:
+          headers:
+            type: array
+            items: { type: string }
+          rows:
+            type: array
+            items:
+              type: array
+              items: { type: string }
+
+  block_types:
+    heading1:
+      description: "一级标题"
+      content: { type: string, required: true }
+
+    heading2:
+      description: "二级标题"
+      content: { type: string, required: true }
+
+    paragraph:
+      description: "正文段落，可选粗体前缀"
+      content: { type: string }
+      bold_prefix: { type: string }
+
+    sheet:
+      description: "电子表格占位块。数据从 context.sheets 按 sheet_ref 取值，render 阶段通过 csv-put 填充"
+      sheet_ref:
+        type: string
+        required: true
+        ref: "$.context.sheets"
+
+    # pragma 类型：不直接渲染为块，而是指示 renderer 在构建时解析引用内容
+    render-order:
+      description: "Pragma：从 task-compiler 节点输出文件读取内容注入此处。path 相对于 IR 文件所在目录"
+      type: pragma
+      path:
+        type: string
+        required: true
+        description: "节点输出文件路径，如 agents/summary-1/result.md"
+      bold_prefix:
+        type: string
+        description: "可选粗体前缀，内容从文件读取后渲染为粗体+正文段落"
+
+blocks:
+  directory: blocks
+  registry:
+    heading1: heading1
+    heading2: heading2
+    paragraph: paragraph
+    sheet: sheet

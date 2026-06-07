@@ -1,0 +1,129 @@
+workflow:
+  name: feishu-sales-report
+  description: 飞书综合数据报告：数据生成 → IR 构建 → Agent 摘要 → 渲染
+  mode: static
+  on_failure: abort
+  nodes:
+    # ── Wave 0: 数据生成（独立并行） ──
+    - id: generate-data-1
+      type: program
+      description: 生成产品销售假数据
+      capture: sales_data
+      command: python .claude/skills/task-compiler/workflows/feishu-sales-report/generate_data.py
+
+    - id: generate-data-2
+      type: program
+      description: 生成区域客户假数据
+      capture: customer_data
+      command: python .claude/skills/task-compiler/workflows/feishu-sales-report/generate_data_v2.py
+
+    # ── Wave 1: IR 骨架构建（纯数据，无 lark-cli） ──
+    - id: build-ir
+      type: program
+      description: 计算统计数据，输出含 render-order pragma 的 IR
+      capture: ir_skeleton
+      depends_on:
+        - generate-data-1
+        - generate-data-2
+      command: >
+        python .claude/skills/task-compiler/workflows/feishu-sales-report/build_ir.py
+        --output-dir output/feishu-report-8
+        --result1 output/feishu-report-8/nodes/generate-data-1/result
+        --result2 output/feishu-report-8/nodes/generate-data-2/result
+
+    # ── Wave 2: Agent 生成子总结（纯文本，无 side effect） ──
+    - id: summary-2-2
+      type: agent
+      description: 分析销售数据，生成 2.2 子总结
+      context:
+        input_from:
+          - build-ir
+      depends_on:
+        - build-ir
+      prompt: |
+        你是一个数据分析师。基于产品销售数据生成「2.2 总结」章节。
+
+        ## 输入数据
+        在 context.json 的 input_sources 中找到 build-ir 节点的输出，
+        其中包含 IR YAML。从中提取：
+        - `_stats.sales`：各指标的统计数据（均值、最小值、最大值）
+        - `_stats.sales_overview`：概要文本
+        - `sheets.sales`：原始数据表（headers + rows）
+
+        ## 输出要求
+        撰写 150-250 字的专业数据总结，覆盖：
+        - 总营收和总订单量
+        - 表现最佳/最差的产品及月份
+        - 产品间对比分析
+        - 数据洞察
+
+        输出格式（只输出 JSON，不要包含其他文字）：
+        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+
+    - id: summary-3-2
+      type: agent
+      description: 分析区域客户数据，生成 3.2 子总结
+      context:
+        input_from:
+          - build-ir
+      depends_on:
+        - build-ir
+      prompt: |
+        你是一个数据分析师。基于区域客户数据生成「3.2 总结」章节。
+
+        ## 输入数据
+        在 context.json 的 input_sources 中找到 build-ir 节点的输出，
+        其中包含 IR YAML。从中提取：
+        - `_stats.customers`：各指标的统计数据（均值、最小值、最大值）
+        - `_stats.customers_overview`：概要文本
+        - `sheets.customers`：原始数据表（headers + rows）
+
+        ## 输出要求
+        撰写 150-250 字的专业数据总结，覆盖：
+        - 总访问量、总注册数、总订单数、平均转化率
+        - 各区域对比（访问量最高、转化率最高等）
+        - 季度趋势
+        - 数据洞察和建议
+
+        输出格式（只输出 JSON，不要包含其他文字）：
+        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+
+    # ── Wave 3: Agent 生成最终总结 ──
+    - id: summary-1
+      type: agent
+      description: 综合两份子总结，生成 1. 最终总结
+      context:
+        input_from:
+          - summary-2-2
+          - summary-3-2
+      depends_on:
+        - summary-2-2
+        - summary-3-2
+      prompt: |
+        你是一个数据分析师。综合产品销售和区域客户两份子总结，
+        生成报告最终的「1. 总结」章节。
+
+        ## 输入数据
+        在 context.json 的 input_sources 中找到：
+        - summary-2-2 的输出（JSON，含 text 字段）
+        - summary-3-2 的输出（JSON，含 text 字段）
+
+        ## 输出要求
+        撰写 300-500 字的综合性报告总结，覆盖：
+        - 两组数据的核心发现
+        - 跨模块对比和关联分析
+        - 关键指标总结
+        - 业务洞察和建议
+
+        输出格式（只输出 JSON，不要包含其他文字）：
+        {"status": "ok", "text": "总结内容（纯文本，不含 Markdown）"}
+
+    # ── Post-Phase-3: 渲染为飞书文档 ──
+    - id: render-doc
+      type: plugin
+      description: 消费完整 IR，通过 render-feishu 插件创建飞书云文档
+      plugin: render-feishu
+      input_from: build-ir
+      depends_on:
+        - build-ir
+        - summary-1
