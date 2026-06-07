@@ -120,3 +120,53 @@ workflow:
       depends_on:
         - build-ir
         - summary-1
+
+    # ── Wave 4: 数据可视化 ──
+    - id: apply-data-bars
+      type: agent
+      description: 为两个表格的数字列添加绿色渐变数据条
+      requires:
+        skills:
+          - lark-sheets
+        tools:
+          - lark-cli
+      depends_on:
+        - render-doc
+      output:
+        files:
+          - result.md
+      prompt: |
+        为飞书文档中两个嵌入式表格的数字列添加绿色渐变数据条。
+
+        ## Sheet 信息
+
+        render-doc 节点的输出提供了 spreadsheet_token 和 sheet_id：
+        ```
+        {{ nodes.render-doc.result }}
+        ```
+
+        - sheets[0]：**产品销售表**，表头 [产品名称, 月份, 销量, 单价（元）, 销售额（元）]
+        - sheets[1]：**区域客户表**，表头 [区域, 季度, 访问量, 注册数, 订单数, 转化率(%)]
+
+        ## 需要添加数据条的数字列
+
+        产品销售表（从第 2 行开始到数据末尾）：
+        - C 列（销量）
+        - D 列（单价）
+        - E 列（销售额）
+
+        区域客户表（从第 2 行开始到数据末尾）：
+        - C 列（访问量）
+        - D 列（注册数）
+        - E 列（订单数）
+        - F 列（转化率）
+
+        ## 执行步骤
+
+        1. 先通过 `lark-cli sheets +cond-format-create --print-schema --flag-name properties` 查看 dataBar 规则需要的完整 properties 结构
+        2. 对每个数字列执行 `lark-cli sheets +cond-format-create`，使用 `--rule-type dataBar`
+        3. 数据条使用绿色渐变配色
+        4. 每列单独创建一条规则
+        5. 创建后通过 `+cond-format-list` 验证数据条已生效
+
+        将执行结果（sheet token、各列规则 id）写入 output_files 中指定的文件。
