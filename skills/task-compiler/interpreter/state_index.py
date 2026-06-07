@@ -5,6 +5,8 @@ State index — unified state management for workflow execution.
 Read: auto-discovers wave progress, node results, and artifacts from session dir.
 Write: supports dispatch, wave-complete, rollback for state transitions.
 
+Output format: YAML (more compact than JSON, fewer tokens).
+
 Usage:
     python state_index.py <session_dir>                   # Full snapshot
     python state_index.py <session_dir> status            # Compact status
@@ -19,6 +21,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
+import yaml
 
 STATE_FILE = "execution_state.yaml"
 
@@ -39,7 +43,6 @@ def read_state(session_dir: Path) -> dict | None:
     path = session_dir / STATE_FILE
     if not path.exists():
         return None
-    import yaml
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8"))
     except Exception:
@@ -47,7 +50,6 @@ def read_state(session_dir: Path) -> dict | None:
 
 
 def write_state(session_dir: Path, state: dict):
-    import yaml
     path = session_dir / STATE_FILE
     path.write_text(
         yaml.dump(state, allow_unicode=True, default_flow_style=None, sort_keys=False),
@@ -74,6 +76,11 @@ def read_json(path: Path) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def out(data: dict):
+    """Print as YAML to stdout."""
+    print(yaml.dump(data, allow_unicode=True, default_flow_style=None, sort_keys=False).rstrip())
 
 
 # ── Index (read) ──
@@ -215,7 +222,7 @@ def cmd_init(session_dir: Path):
         "waves": wave_states,
     }
     write_state(session_dir, state)
-    print(json.dumps({"status": "ok", "action": "init"}))
+    out({"action": "init", "status": "ok"})
 
 
 def cmd_status(session_dir: Path):
@@ -246,7 +253,7 @@ def cmd_status(session_dir: Path):
         if s.get(field):
             output[field] = s[field]
 
-    print(json.dumps(output, ensure_ascii=False))
+    out(output)
 
 
 def show_node(session_dir: Path, node_id: str):
@@ -270,7 +277,7 @@ def show_node(session_dir: Path, node_id: str):
         if pf.exists():
             info[name] = pf.read_text(encoding="utf-8")[:1000]
 
-    print(json.dumps(info, indent=2, ensure_ascii=False))
+    out(info)
 
 
 def cmd_dispatch(session_dir: Path, node_ids: list[str]):
@@ -291,7 +298,7 @@ def cmd_dispatch(session_dir: Path, node_ids: list[str]):
                 ws["status"] = "in_progress"
 
     write_state(session_dir, state)
-    print(json.dumps({"action": "dispatch", "dispatched": marked}))
+    out({"action": "dispatch", "dispatched": marked})
 
 
 def cmd_wave_complete(session_dir: Path):
@@ -314,7 +321,6 @@ def cmd_wave_complete(session_dir: Path):
             break
 
     if not found:
-        # No active wave — complete the first pending one
         for ws in state["waves"]:
             if ws["status"] == "pending":
                 for ns in ws["nodes"]:
@@ -325,15 +331,12 @@ def cmd_wave_complete(session_dir: Path):
 
     if not found:
         all_done = all(ws["status"] == "completed" for ws in state["waves"])
-        print(json.dumps({
+        out({
             "action": "wave-complete",
             "status": "all-complete" if all_done else "nothing-to-advance",
-        }))
-        if all_done:
-            write_state(session_dir, state)
+        })
         sys.exit(0 if all_done else 1)
 
-    # Ensure earlier waves are marked completed
     for ws in state["waves"]:
         if ws["status"] == "completed":
             for ns in ws["nodes"]:
@@ -354,7 +357,7 @@ def cmd_wave_complete(session_dir: Path):
         "pending_nodes": pending,
         "next_action": f"dispatch: {', '.join(pending)} (wave {cw})" if pending else "await completed",
     }
-    print(json.dumps(output, ensure_ascii=False))
+    out(output)
 
 
 def cmd_rollback(session_dir: Path, target_wave: int):
@@ -402,11 +405,10 @@ def cmd_rollback(session_dir: Path, target_wave: int):
             else f"no nodes to re-run at wave {target_wave}"
         ),
     }
-    # Also note the skipped nodes as hint
     if skipped:
-        output["note"] = f"{len(skipped)} idempotent node(s) skipped (cached results reused): {', '.join(skipped)}"
+        output["note"] = f"{len(skipped)} idempotent node(s) skipped: {', '.join(skipped)}"
 
-    print(json.dumps(output, ensure_ascii=False))
+    out(output)
 
 
 # ── Main ──
@@ -420,7 +422,6 @@ def main():
     if not session_dir.exists():
         session_dir = find_session_dir(sys.argv[1])
 
-    # Parse action and flags
     action = None
     action_args = []
     show_node_id = None
@@ -449,7 +450,6 @@ def main():
         else:
             i += 1
 
-    # Route to action
     if show_node_id:
         show_node(session_dir, show_node_id)
         return
@@ -458,15 +458,15 @@ def main():
         index = index_session(session_dir)
         for ws in index.get("waves", []):
             if ws["wave"] == filter_wave:
-                print(json.dumps(ws, indent=2, ensure_ascii=False))
+                out(ws)
                 return
-        print(json.dumps({"error": f"wave {filter_wave} not found"}), ensure_ascii=False)
+        out({"error": f"wave {filter_wave} not found"})
         return
 
     if filter_status:
         index = index_session(session_dir)
         matching = [ns for ws in index.get("waves", []) for ns in ws["nodes"] if ns["status"] == filter_status]
-        print(json.dumps(matching, indent=2, ensure_ascii=False))
+        out({"nodes": matching})
         return
 
     if action == "init":
@@ -483,8 +483,7 @@ def main():
             sys.exit(1)
         cmd_rollback(session_dir, int(action_args[0]))
     else:
-        # Default: full snapshot
-        print(json.dumps(index_session(session_dir), indent=2, ensure_ascii=False))
+        out(index_session(session_dir))
 
 
 if __name__ == "__main__":
