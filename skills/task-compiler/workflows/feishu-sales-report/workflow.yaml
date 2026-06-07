@@ -37,6 +37,9 @@ workflow:
       description: 分析销售数据，生成 2.2 子总结
       depends_on:
         - build-ir
+      output:
+        files:
+          - result.md
       prompt: |
         你是一个数据分析师。基于产品销售数据生成「2.2 总结」章节。
 
@@ -62,6 +65,9 @@ workflow:
       description: 分析区域客户数据，生成 3.2 子总结
       depends_on:
         - build-ir
+      output:
+        files:
+          - result.md
       prompt: |
         你是一个数据分析师。基于区域客户数据生成「3.2 总结」章节。
 
@@ -89,6 +95,9 @@ workflow:
       depends_on:
         - summary-2-2
         - summary-3-2
+      output:
+        files:
+          - result.md
       prompt: |
         你是一个数据分析师。综合产品销售和区域客户两份子总结，
         生成报告最终的「1. 总结」章节。

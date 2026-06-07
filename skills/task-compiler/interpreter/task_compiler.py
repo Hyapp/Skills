@@ -14,6 +14,10 @@ Flags:
                                this field tells the main Agent which SubAgent
                                dispatch instructions to follow in Phase 3.
 
+    --output-validate          Force enable output validation for agent nodes
+                               (dynamic mode defaults to on, static to off).
+    --no-output-validate       Force disable output validation.
+
 Dependencies: Python 3 stdlib only (json, subprocess, glob, pathlib, os, sys)
 """
 
@@ -117,7 +121,7 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
 
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime codex|trae|claude]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} workflow.json [--output-dir ./output] [--session name] [--debug] [--clean] [--on-failure abort|retry|pause] [--max-retries N] [--agent-runtime codex|trae|claude] [--output-validate|--no-output-validate]", file=sys.stderr)
         sys.exit(1)
 
     input_path = Path(sys.argv[1])
@@ -128,6 +132,7 @@ def main():
     cli_on_failure = None
     cli_max_retries = 3
     agent_runtime = None
+    output_validate = None  # None=auto(dynamic=on,static=off), True=force, False=off
     for i, arg in enumerate(sys.argv):
         if arg == "--output-dir" and i + 1 < len(sys.argv):
             base_dir = Path(sys.argv[i + 1])
@@ -143,6 +148,10 @@ def main():
             cli_max_retries = int(sys.argv[i + 1])
         if arg == "--agent-runtime" and i + 1 < len(sys.argv):
             agent_runtime = sys.argv[i + 1]
+        if arg == "--output-validate":
+            output_validate = True
+        if arg == "--no-output-validate":
+            output_validate = False
 
     # Validate agent_runtime
     VALID_AGENT_RUNTIMES = {"codex", "trae", "claude"}
@@ -312,7 +321,16 @@ def main():
             result = eval_text(node, context, output_dir)
 
         elif ntype == "agent":
-            result = prepare_agent(node, context, output_dir, id_map)
+            # Resolve output validation: explicit flag > node config > mode default
+            ov = output_validate
+            if ov is None:
+                node_output = node.get("output", {})
+                if isinstance(node_output, dict) and node_output.get("files"):
+                    ov = True
+                else:
+                    ov = (wf.get("mode", "static") == "dynamic")
+            result = prepare_agent(node, context, output_dir, id_map,
+                                   output_validate=ov, workflow_mode=wf.get("mode", "static"))
 
         elif ntype == "plugin":
             result = prepare_plugin(node, output_dir, available_plugins)

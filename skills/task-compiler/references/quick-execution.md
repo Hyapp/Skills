@@ -24,6 +24,8 @@
 | `--clean` | 执行成功后自动删除会话目录 |
 | `--on-failure <strategy>` | `abort`（停止）\| `retry`（重试）\| `pause`（暂停） |
 | `--max-retries N` | 重试次数（默认 3），仅 `retry` 策略有效 |
+| `--output-validate` | 强制启用 agent 节点输出校验（dynamic 模式默认启用，static 默认关闭） |
+| `--no-output-validate` | 强制禁用 agent 节点输出校验 |
 
 ## 手动调用解释器
 

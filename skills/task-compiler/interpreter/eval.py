@@ -88,9 +88,13 @@ def eval_text(node: dict, context: dict, output_dir: Path) -> dict:
     return result
 
 
-def prepare_agent(node: dict, context: dict, output_dir: Path, id_map_local: dict) -> dict:
+def prepare_agent(node: dict, context: dict, output_dir: Path, id_map_local: dict,
+                  output_validate: bool = False, workflow_mode: str = "static") -> dict:
     """Generate prompt file, context file, and file list for an agent node.
     Does NOT execute the agent — that's the main Agent's job.
+
+    If output_validate is True, appends validation instructions to the prompt
+    so the SubAgent self-validates after generating output.
     """
     nid = node["id"]
     agent_dir = output_dir / "agents" / nid
@@ -99,7 +103,52 @@ def prepare_agent(node: dict, context: dict, output_dir: Path, id_map_local: dic
     files_dir.mkdir(exist_ok=True)
 
     prompt = expand_expr(node["prompt"], context)
-    (agent_dir / "prompt.md").write_text(prompt, encoding="utf-8")
+
+    agent_params = {
+        "prompt_file": str(agent_dir / "prompt.md"),
+        "context_file": str(agent_dir / "context.json"),
+        "files_dir": str(files_dir),
+    }
+
+    # ── Output validation ──
+    output_config = node.get("output", {})
+    output_files = output_config.get("files", []) if isinstance(output_config, dict) else []
+    if output_validate:
+        interpreter_dir = Path(__file__).resolve().parent
+        validate_script = str(interpreter_dir / "validate_output.py")
+
+        # Resolve output files relative to agent_dir
+        output_paths = [str((agent_dir / f).resolve()) for f in output_files] if output_files else []
+
+        # Build validate block — files list + validate command
+        validate_block = "\n\n---\n## 输出文件\n\n任务完成后，将结果写入：\n"
+        if output_paths:
+            for p in output_paths:
+                validate_block += f"- `{p}`\n"
+        else:
+            default_path = agent_dir / "result.md"
+            output_paths = [str(default_path.resolve())]
+            validate_block += f"- `{default_path}`\n"
+
+        validate_block += (
+            "\n然后运行校验：\n\n"
+            "```bash\n"
+        )
+        validate_block += f"python {validate_script} " + " ".join(output_paths) + "\n"
+        validate_block += (
+            "```\n\n"
+            "如果校验失败（exit code ≠ 0），根据 stdout 中的错误信息修复输出，重新校验。\n"
+            "通过后再返回。\n"
+        )
+        prompt += validate_block
+        (agent_dir / "prompt.md").write_text(prompt, encoding="utf-8")
+
+        agent_params["output"] = {
+            "files": output_paths,
+            "validate_script": validate_script,
+        }
+    else:
+        (agent_dir / "prompt.md").write_text(prompt, encoding="utf-8")
 
     resolved_files = []
     context_spec = node.get("context", {})
@@ -163,11 +212,7 @@ def prepare_agent(node: dict, context: dict, output_dir: Path, id_map_local: dic
 
     result = {
         "status": "pending",
-        "agent_params": {
-            "prompt_file": str(agent_dir / "prompt.md"),
-            "context_file": str(agent_dir / "context.json"),
-            "files_dir": str(files_dir),
-        },
+        "agent_params": agent_params,
         "from_outputs": from_outputs,
     }
     if from_all_outputs:

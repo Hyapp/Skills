@@ -131,6 +131,9 @@ Plugin 节点在 Phase 2 被**发现并验证**（检查 plugin.yaml 存在、ex
       - lark-cli
   depends_on:
     - data-prep
+  output:                    # 可选，声明输出文件（用于校验）
+    files:
+      - result.md
   agent_params:
     prompt_file: agents/my-agent/prompt.md     # prompt 模板（{{ }} 已展开）
     context_file: agents/my-agent/context.json  # 文件清单和输入源
@@ -141,6 +144,20 @@ Plugin 节点在 Phase 2 被**发现并验证**（检查 plugin.yaml 存在、ex
 |------|------|
 | `recovery` | `auto`（默认）：无副作用或幂等，失败可直接重跑；`manual`：有不可逆副作用，失败时主 Agent 汇总副产物清单供用户确认 |
 | `manifest` | 人类可读的副作用清单，仅 `recovery: manual` 时生效。失败时展示给用户"预期有哪些东西，部分可能已创建" |
+| `output.files` | 输出文件列表（相对于 agent 节点目录）。声明后解释器自动注入校验步骤到 prompt，SubAgent 执行完毕后用 task-compiler 内置的 `interpreter/validate_output.py` 校验所有文件存在且非空。不声明则根据 workflow.mode 决定：dynamic 模式默认开启（校验 `result.md`），static 模式默认关闭。可通过 `--output-validate` / `--no-output-validate` CLI 标志强制开关 |
+
+#### 输出校验流程
+
+output 校验使用 task-compiler 内置的固定校验脚本 (`interpreter/validate_output.py`)，幂等且不可定制：
+
+1. 解释器将输出文件列表和校验命令注入到 SubAgent 的 prompt 尾部
+2. SubAgent 执行任务，将结果写入声明的输出文件
+3. SubAgent 运行 `python validate_output.py <file1> <file2> ...`
+4. 校验通过（exit 0）→ 返回结果
+5. 校验失败（exit 1）→ SubAgent 读取 stdout 中的错误描述（"文件不存在"或"文件为空"），自行修复后回到步骤 3
+6. 重试耗尽 → 标记 failed 返回
+
+解释器不参与重试循环。校验脚本是 task-compiler 自带的固定脚本，不依赖自定义校验逻辑。
 
 ## `{{ }}` 表达式
 
