@@ -30,9 +30,9 @@ workflow:
         - generate-data-2
       command: >
         python ./workflows/feishu-sales-report/build_ir.py
-        --output-dir output/feishu-report-8
-        --result1 output/feishu-report-8/nodes/generate-data-1/result
-        --result2 output/feishu-report-8/nodes/generate-data-2/result
+        --output-dir {{ session.output_dir }}
+        --result1 {{ nodes.generate-data-1.result_file }}
+        --result2 {{ nodes.generate-data-2.result_file }}
 
     # ── Wave 2: Agent 生成子总结（纯文本，无 side effect）──
     - id: summary-2-2

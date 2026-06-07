@@ -1,6 +1,30 @@
 # 执行流程
 
-主 Agent 按四个阶段调度 workflow。
+主 Agent 按五个阶段调度 workflow。
+
+## 阶段 0：上下文恢复
+
+**每次被调用时最先执行的步骤。** 在开始任何新工作流之前，先检查是否有未完成的 session：
+
+1. 运行恢复检查：
+   ```bash
+   python ./interpreter/state_index.py recover
+   ```
+
+2. 如果输出 `recoverable_sessions` 非空，取第一个 in_progress 的 session：
+   - 恢复命令给出 `session`、`current_wave`、`pending_nodes`、`next_action`
+   - 直接按 `next_action` 执行（dispatch 或 wave-complete）
+   - 从 [阶段 3](#阶段-3执行节点按-wave-并行) 继续，**跳过阶段 1-2**
+
+3. 如果有一个以上 in_progress session，向用户报告所有可恢复 session，请用户选择
+
+4. 如果无 in_progress session，正常进入阶段 1
+
+### 压缩后的自动恢复
+
+当主 Agent 遭遇上下文压缩后重新加载 skill 时，阶段 0 自动触发。检查流程同上：`recover` → 发现 in_progress → 直接接续执行。
+
+这意味着主 Agent **不需要记住当前执行到哪个 session**——每次被调用都从检查开始，有未完成的工作就继续，没有才新建。
 
 ## 阶段 1：初始节点准备
 

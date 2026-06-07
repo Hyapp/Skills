@@ -46,7 +46,28 @@ python ./interpreter/state_index.py ./output/<session> init
 
 ## 上下文恢复
 
-压缩后快速恢复：
+压缩后自动恢复（主 Agent 加载 skill 时自动执行）：
+
+```bash
+# 扫描所有 in_progress session
+python ./interpreter/state_index.py recover
+```
+
+输出示例：
+```yaml
+recoverable_sessions:
+- session: feishu-report-9
+  workflow: feishu-sales-report
+  current_wave: 2
+  completed: 3
+  total: 8
+  pending_nodes: [summary-2-2, summary-3-2]
+  next_action: 'dispatch: summary-2-2, summary-3-2 (wave 2)'
+```
+
+有 in_progress session 时主 Agent 直接按 `next_action` 接续执行，跳过阶段 1-2。
+
+也可手动恢复：
 
 ```bash
 # 当前 wave 和下一步

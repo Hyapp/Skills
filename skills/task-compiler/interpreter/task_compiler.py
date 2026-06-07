@@ -254,12 +254,18 @@ def main():
         },
         "variables": variables,
         "nodes": {},
+        "session": {
+            "output_dir": str(output_dir.resolve()),
+            "name": output_dir.name,
+        },
     }
 
     # Preload existing session state
     if session_name:
         existing = load_session_state(output_dir)
         if existing:
+            for nid, ndata in existing.items():
+                ndata["result_file"] = str((output_dir / "nodes" / nid / "result").resolve())
             context["nodes"].update(existing)
             print(f"  [session state] loaded {len(existing)} existing node(s)")
 
@@ -303,6 +309,7 @@ def main():
         if cached is not None:
             node_results[nid] = cached
             context["nodes"][nid] = cached
+            cached["result_file"] = str((output_dir / "nodes" / nid / "result").resolve())
             executed.add(nid)
             tag = "cached:debug" if debug else "cached"
             print(f"  [{tag}] {nid}")
@@ -358,6 +365,7 @@ def main():
             result = prepare_plugin(node, output_dir, available_plugins)
 
         node_results[nid] = result
+        result["result_file"] = str((output_dir / "nodes" / nid / "result").resolve())
         context["nodes"][nid] = result
         executed.add(nid)
         if "_cached" not in result:

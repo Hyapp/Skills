@@ -18,6 +18,7 @@ Usage:
     python state_index.py <session_dir> rollback <wave>   # Roll back to specific wave
     python state_index.py <session_dir> rollback          # Default: one wave back
 """
+import glob
 import json
 import os
 import sys
@@ -26,6 +27,8 @@ from pathlib import Path
 import yaml
 
 STATE_FILE = "execution_state.yaml"
+OUTPUT_DIRS = ["./output", "."]
+LATEST_SESSION_FILE = "latest.session"
 
 
 # ── Helpers ──
@@ -420,12 +423,168 @@ def cmd_rollback(session_dir: Path, target_wave: int):
     out(output)
 
 
+# ── Recovery ──
+
+def cmd_recover(output_base: Path | None = None):
+    """Find all in-progress sessions and report recoverable state.
+
+    Scans output directories for execution_state.yaml with status=in_progress.
+    Returns YAML with recoverable sessions, each containing current_wave,
+    pending_nodes, and next_action for immediate resume.
+
+    When no session is in_progress, checks latest.session for a completed
+    session and reports it as the most recent execution.
+    """
+    scan_dirs = []
+    if output_base:
+        scan_dirs.append(output_base.resolve())
+    else:
+        for d in OUTPUT_DIRS:
+            p = Path(d)
+            if p.exists():
+                scan_dirs.append(p.resolve())
+
+    recoverable = []
+    latest = None
+    latest_path = None
+
+    for base in scan_dirs:
+        for state_file in sorted(glob.glob(str(base / "**" / STATE_FILE), recursive=True)):
+            sp = Path(state_file)
+            try:
+                st = yaml.safe_load(sp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(st, dict):
+                continue
+
+            session_dir = sp.parent
+            status = st.get("status", "unknown")
+
+            if status == "in_progress":
+                idx = index_session(session_dir)
+                s = idx.get("summary", {})
+                pending = s.get("pending_nodes", [])
+                cw = s.get("current_wave")
+                recoverable.append({
+                    "session": session_dir.name,
+                    "path": str(session_dir.resolve()),
+                    "workflow": st.get("workflow", "unknown"),
+                    "current_wave": cw,
+                    "completed": s.get("completed"),
+                    "total": s.get("total"),
+                    "pending_nodes": pending,
+                    "next_action": (
+                        f"dispatch: {', '.join(pending)} (wave {cw})" if pending and cw is not None
+                        else "wave-complete" if cw is not None
+                        else "all-complete"
+                    ),
+                    "failed_nodes": s.get("failed_nodes", []),
+                })
+            elif status == "completed":
+                # Track latest completed session for reference
+                if latest is None or session_dir.stat().st_mtime > latest_path.stat().st_mtime if latest_path else True:
+                    latest = {
+                        "session": session_dir.name,
+                        "path": str(session_dir.resolve()),
+                        "workflow": st.get("workflow", "unknown"),
+                        "status": "completed",
+                    }
+                    latest_path = session_dir
+
+    result = {"recoverable_sessions": recoverable}
+    if latest:
+        result["latest_completed"] = latest
+
+    # Also check latest.session file
+    for base in scan_dirs:
+        lsf = base / LATEST_SESSION_FILE
+        if lsf.exists():
+            try:
+                last_name = lsf.read_text(encoding="utf-8").strip()
+                if last_name:
+                    result["latest_session_file"] = str(lsf.resolve())
+                    # Check if the latest session is already in recoverable
+                    if not any(s["session"] == last_name for s in recoverable):
+                        last_dir = base / last_name
+                        if last_dir.exists():
+                            last_state = last_dir / STATE_FILE
+                            if last_state.exists():
+                                try:
+                                    lst = yaml.safe_load(last_state.read_text(encoding="utf-8"))
+                                    if isinstance(lst, dict):
+                                        result["latest_session_state"] = lst.get("status", "unknown")
+                                except Exception:
+                                    pass
+            except Exception:
+                pass
+            break
+
+    out(result)
+
+
+def auto_recover(session_dir: Path) -> dict | None:
+    """Try to auto-recover an in-progress session.
+    Returns the recovery action dict, or None if not recoverable.
+    """
+    state_file = session_dir / STATE_FILE
+    if not state_file.exists():
+        return None
+
+    try:
+        st = yaml.safe_load(state_file.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if not isinstance(st, dict) or st.get("status") != "in_progress":
+        return None
+
+    # Read build_plan to verify it still exists
+    plan_file = session_dir / "build_plan.json"
+    if not plan_file.exists():
+        return None
+
+    return cmd_recover_inner(session_dir, st)
+
+
+def cmd_recover_inner(session_dir: Path, st: dict) -> dict:
+    """Inner recovery logic - produce resume action."""
+    idx = index_session(session_dir)
+    s = idx.get("summary", {})
+    pending = s.get("pending_nodes", [])
+    cw = s.get("current_wave")
+
+    return {
+        "action": "recover",
+        "session": session_dir.name,
+        "workflow": st.get("workflow", "unknown"),
+        "current_wave": cw,
+        "completed": s.get("completed"),
+        "total": s.get("total"),
+        "pending_nodes": pending,
+        "next_action": (
+            f"dispatch: {', '.join(pending)} (wave {cw})" if pending and cw is not None
+            else "wave-complete" if cw is not None
+            else "all-complete"
+        ),
+        "failed_nodes": s.get("failed_nodes", []),
+        "skipped_nodes": s.get("skipped_nodes", []),
+        "session_dir": str(session_dir.resolve()),
+    }
+
+
 # ── Main ──
 
 def main():
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
         sys.exit(1)
+
+    # Special case: recover scans all sessions, doesn't take a session dir
+    if sys.argv[1] == "recover":
+        output_base = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
+        cmd_recover(Path(output_base) if output_base else None)
+        return
 
     session_dir = Path(sys.argv[1]).resolve()
     if not session_dir.exists():
