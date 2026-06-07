@@ -1,4 +1,4 @@
-# Skills — Claude Code Skill Collection
+﻿# Skills — Claude Code Skill Collection
 
 A collection of reusable skills for [Claude Code](https://claude.ai/code).
 
@@ -6,84 +6,9 @@ A collection of reusable skills for [Claude Code](https://claude.ai/code).
 
 ---
 
-## task-compiler
+## Available Skills
 
-Execute **vDSL workflows** — define a DAG in YAML, schedule and run nodes in dependency order.
-
-### Quick Start
-
-```yaml
-# workflow.yaml
-workflow:
-  name: example
-  nodes:
-    - id: step-1
-      type: program
-      command: echo "hello"
-    - id: step-2
-      type: agent
-      depends_on: [step-1]
-      prompt: |
-        Continue based on step-1 output.
-```
-
-```bash
-/task-compile workflows/example/workflow.yaml
-```
-
-### Node Types
-
-| Type | Description |
-|------|-------------|
-| `program` | Execute a shell command |
-| `agent` | Spawn a SubAgent for complex tasks |
-| `plugin` | Invoke a registered plugin (e.g. render to Feishu doc) |
-| `expand` | Dynamically expand template nodes |
-| `text` | Expand `{{ }}` templates into text |
-
-### Features
-
-- **DAG scheduling** — topological sort with wave-based grouping. Implicit dependency injection (`{{ nodes.X.result }}` auto-adds `depends_on`)
-- **Plugin system** — `plugins/<name>/plugin.yaml` declares IR schema + execute entry point. Auto-discovered at startup
-- **Feishu rendering** — `render-feishu` plugin converts IR → Feishu cloud doc. Supports heading, paragraph, sheet blocks with lazy-loaded handlers
-- **Error handling** — abort / retry / pause / skip strategies, per-node retry limits, content hash cache
-- **Session management** — `--session <name>` reuses previous outputs for incremental execution
-
-### Project Structure
-
-```
-.claude/skills/task-compiler/
-├── SKILL.md                     # Skill entry point (loaded by Claude Code)
-├── interpreter/                  # vDSL interpreter
-│   ├── task_compiler.py          # Main entry
-│   ├── validate.py               # Validation + plugin discovery
-│   ├── eval.py                   # Node evaluation (program/agent/expand)
-│   └── dag.py                    # Topological sort
-├── plugins/
-│   └── render-feishu/            # Feishu document render plugin
-│       ├── plugin.yaml           # IR schema + execute declaration
-│       ├── render.py             # CLI: IR → Feishu doc
-│       ├── utils.py              # lark-cli wrapper
-│       └── blocks/               # Block type handlers (lazy-loaded)
-├── references/                   # Documentation
-└── workflows/
-    └── feishu-sales-report/      # Example: sales report generation
-```
-
-### How to Use
-
-Load this skill in Claude Code:
-
-```bash
-# Place in your Claude Code skills directory, or
-/claude-code load-skill .claude/skills/task-compiler
-```
-
-Run a workflow:
-
-```bash
-/task-compile workflows/feishu-sales-report/workflow.yaml --session report-1
-```
+- [task-compiler](./wiki/task-compiler.md) — Execute vDSL workflows: define a DAG in YAML, schedule and run nodes in dependency order.
 
 ---
 
