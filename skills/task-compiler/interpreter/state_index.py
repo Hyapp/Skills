@@ -358,11 +358,19 @@ def cmd_wave_complete(session_dir: Path):
 
 
 def cmd_rollback(session_dir: Path, target_wave: int):
-    """Roll back to target wave, resetting all later waves."""
+    """Roll back to target wave, resetting all later waves.
+    Idempotent nodes (idempotent=true in DSL) keep their completed status."""
     state = read_state(session_dir)
     if not state:
         print("No state found. Run 'init' first.", file=sys.stderr)
         sys.exit(1)
+
+    # Read idempotent flag from build_plan execution_order
+    plan = read_build_plan(session_dir)
+    idempotent_nodes = set()
+    for entry in plan.get("execution_order", []):
+        if entry.get("idempotent"):
+            idempotent_nodes.add(entry["id"])
 
     waves = state["waves"]
     if target_wave < 0 or target_wave >= len(waves):
@@ -370,22 +378,35 @@ def cmd_rollback(session_dir: Path, target_wave: int):
         sys.exit(1)
 
     affected = []
+    skipped = []
     for ws in waves:
         if ws["wave"] >= target_wave:
-            ws["status"] = "pending" if ws["wave"] == target_wave else "pending"
+            ws["status"] = "pending"
             for ns in ws["nodes"]:
                 if ns["status"] in ("completed", "dispatched", "running", "in_progress"):
-                    ns["status"] = "pending"
-                    affected.append(ns["id"])
+                    if ns["status"] == "completed" and ns["id"] in idempotent_nodes:
+                        skipped.append(ns["id"])
+                    else:
+                        ns["status"] = "pending"
+                        affected.append(ns["id"])
 
     write_state(session_dir, state)
 
-    print(json.dumps({
+    output = {
         "action": "rollback",
         "target_wave": target_wave,
         "affected_nodes": affected,
-        "next_action": f"re-dispatch wave {target_wave}: {', '.join(affected)}" if affected else f"no nodes to re-run at wave {target_wave}",
-    }, ensure_ascii=False))
+        "skipped_idempotent": skipped,
+        "next_action": (
+            f"re-dispatch wave {target_wave}: {', '.join(affected)}" if affected
+            else f"no nodes to re-run at wave {target_wave}"
+        ),
+    }
+    # Also note the skipped nodes as hint
+    if skipped:
+        output["note"] = f"{len(skipped)} idempotent node(s) skipped (cached results reused): {', '.join(skipped)}"
+
+    print(json.dumps(output, ensure_ascii=False))
 
 
 # ── Main ──

@@ -502,6 +502,9 @@ def main():
             "status": node_results[nid].get("status", "unknown"),
             "wave": wave_of.get(nid, -1),
         }
+        idempotent = node.get("idempotent", False)
+        if idempotent:
+            entry["idempotent"] = True
         recovery = node.get("recovery", "auto")
         if recovery != "auto":
             entry["recovery"] = recovery

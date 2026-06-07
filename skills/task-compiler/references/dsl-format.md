@@ -61,6 +61,7 @@ workflow:
   description: 可选的说明文字
   on_failure: abort            # abort | skip | retry | pause（节点级，覆盖 workflow 级）
   capture: output_var          # 可选，命名捕获 stdout/result，供后续 {{ variables.xxx }} 引用
+  idempotent: true             # 可选，标记节点为幂等。回退时已完成的幂等节点跳过重跑
   requires:                    # 可选，声明运行时环境依赖（所有节点类型均支持）
     skills:
       - lark-doc
@@ -74,6 +75,7 @@ workflow:
 |------|------|------|
 | `requires` | dict | 运行时环境依赖。`skills` 为需要的子技能名称（如 `lark-doc`），`tools` 为需要的可执行文件（如 `lark-cli`）。所有节点类型均可声明。解释器做结构校验，主 Agent 在 Phase 1 做环境可用性校验 |
 | `capture` | string | 将节点的 stdout/result 命名为变量，后续节点通过 `{{ variables.xxx }}` 引用 |
+| `idempotent` | bool | 可选，默认 false。标记节点为幂等——相同输入始终产生相同输出。回退时已完成的幂等节点保留其 completed 状态，不重新执行。适用于固定种子的数据生成、纯计算等无副作用的节点 |
 
 ### program 节点
 
