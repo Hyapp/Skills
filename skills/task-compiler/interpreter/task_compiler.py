@@ -60,8 +60,36 @@ def _truncate_for_plan(nid: str, output_dir: Path, result: dict) -> dict:
     return out
 
 
+def _parse_plugin_yaml_section(lines: list, section: str) -> dict:
+    """Parse a YAML section from plugin.yaml into a dict of key-value pairs.
+
+    Searches for 'section:' heading, then reads indented key: value lines below it.
+    Returns dict of found keys (values stripped of quotes).
+    """
+    result = {}
+    in_section = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == f"{section}:":
+            in_section = True
+            continue
+        if in_section:
+            if not stripped or stripped.startswith("#"):
+                continue
+            if not stripped.startswith("- ") and not line.startswith(" "):
+                break
+            if stripped.startswith("command:"):
+                result["command"] = stripped[len("command:"):].strip().strip("\"'")
+                break
+    return result
+
+
 def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dict:
     """Validate plugin reference and prepare execution parameters.
+
+    Parses both execute.command and optional validate.command from plugin.yaml.
+    The validate.command (if present) is included in plugin_params for the
+    main Agent to run before execution in Phase 3.
 
     Returns:
         dict with status="pending" and plugin_params for the main Agent.
@@ -71,7 +99,7 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
     if not plugin:
         return {"status": "failed", "error": f"plugin '{plugin_name}' not found"}
 
-    # Read plugin.yaml for execute section
+    # Read plugin.yaml
     plugin_dir = Path(plugin["dir"])
     plugin_yaml = plugin_dir / "plugin.yaml"
     try:
@@ -79,44 +107,38 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
     except OSError as e:
         return {"status": "failed", "error": f"cannot read plugin.yaml: {e}"}
 
-    # Minimal parsing of execute.command
-    execute_cmd = None
-    in_execute = False
-    for line in raw.split("\n"):
-        stripped = line.strip()
-        if stripped == "execute:":
-            in_execute = True
-            continue
-        if in_execute:
-            if not stripped or stripped.startswith("#"):
-                continue
-            if not stripped.startswith("- ") and not line.startswith(" "):
-                in_execute = False
-                continue
-            if stripped.startswith("command:"):
-                execute_cmd = stripped[len("command:"):].strip().strip("\"'")
-                break
+    lines = raw.split("\n")
 
-    if not execute_cmd:
+    # Parse execute and validate sections
+    execute_cfg = _parse_plugin_yaml_section(lines, "execute")
+    if not execute_cfg.get("command"):
         return {"status": "failed", "error": f"plugin '{plugin_name}': no execute.command in plugin.yaml"}
 
-    # plugin input IR path resolved from depends_on upstream via Phase 3 SubAgent
-    input_ir = ""
+    validate_cfg = _parse_plugin_yaml_section(lines, "validate")
 
-    # Build final command (expand template vars)
+    execute_cmd = execute_cfg["command"]
+    session_dir = str(output_dir.resolve())
+
+    # Build final execute command (expand template vars)
     final_cmd = execute_cmd.replace("{plugin_dir}", str(plugin_dir.resolve()))
-    final_cmd = final_cmd.replace("{input_ir}", input_ir if input_ir else "{input_ir}")
+    final_cmd = final_cmd.replace("{input_ir}", "{input_ir}")
 
-    result = {
-        "status": "pending",
-        "plugin_params": {
-            "plugin": plugin_name,
-            "command": final_cmd,
-            "plugin_dir": str(plugin_dir.resolve()),
-            "input_ir": input_ir,
-        },
+    plugin_params = {
+        "plugin": plugin_name,
+        "command": final_cmd,
+        "plugin_dir": str(plugin_dir.resolve()),
+        "session_dir": session_dir,
+        "input_ir": "",
     }
-    return result
+
+    # Optional: validate.command (expanded at prepare time, run by main Agent)
+    if validate_cfg.get("command"):
+        validate_cmd = validate_cfg["command"]
+        final_validate = validate_cmd.replace("{plugin_dir}", str(plugin_dir.resolve()))
+        final_validate = final_validate.replace("{session_dir}", session_dir)
+        plugin_params["validate_command"] = final_validate
+
+    return {"status": "pending", "plugin_params": plugin_params}
 
 
 def main():

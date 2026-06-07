@@ -12,6 +12,9 @@ execute:
     type: stdout
     format: json
 
+validate:
+  command: python {plugin_dir}/validate.py {session_dir}
+
 ir:
   media_type: application/vnd.feishu-doc-ir
   format: yaml

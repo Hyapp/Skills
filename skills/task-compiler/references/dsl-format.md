@@ -113,6 +113,34 @@ workflow:
 Plugin 节点在 Phase 2 被**发现并验证**（检查 plugin.yaml 存在、execute.command 完整），状态设为 `pending`。
 主 Agent 在 Phase 3 读取 `plugin_params.command` 执行。
 
+#### plugin.yaml 格式
+
+Plugin 目录下必须包含 `plugin.yaml`：
+
+```yaml
+name: render-feishu
+version: 1
+description: IR → 飞书云文档渲染器
+
+execute:
+  command: python {plugin_dir}/render.py {input_ir}
+
+validate:                     # 可选。执行前校验，主 Agent 在 Phase 3 调用
+  command: python {plugin_dir}/validate.py {session_dir}
+
+ir:                           # 可选。声明 IR schema，供主 Agent 静态校验
+  media_type: application/vnd.feishu-doc-ir
+  format: yaml
+  context: ...
+  block_types: ...
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `execute.command` | 是 | 执行命令。支持模板变量：`{plugin_dir}`（plugin 目录）、`{input_ir}`（IR 文件路径，由主 Agent 在 Phase 3 解析） |
+| `validate.command` | 否 | 前置校验命令。支持模板变量：`{plugin_dir}`、`{session_dir}`（会话输出目录）。exit 0 继续，exit ≠ 0 阻断执行 |
+| `ir` | 否 | IR schema 声明，主 Agent 在 Phase 3 做静态校验时参考 |
+
 解释器在启动时自动扫描 `plugins/*/plugin.yaml` 发现所有可用 plugin。
 
 ### agent 节点
