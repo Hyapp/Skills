@@ -2,6 +2,8 @@
 
 Execute **vDSL workflows** — define a DAG in YAML, schedule and run nodes in dependency order.
 
+Compatible with **Claude Code**, **Codex**, and **Trae**.
+
 ## Quick Start
 
 ```yaml
@@ -45,7 +47,7 @@ workflow:
 
 ```
 .claude/skills/task-compiler/
-├── SKILL.md                     # Skill entry point (loaded by Claude Code)
+├── SKILL.md                     # Skill entry point
 ├── interpreter/                  # vDSL interpreter
 │   ├── task_compiler.py          # Main entry
 │   ├── validate.py               # Validation + plugin discovery
@@ -64,11 +66,14 @@ workflow:
 
 ## How to Use
 
-Load this skill in Claude Code:
+Place in your agent's skills directory, or:
 
 ```bash
-# Place in your Claude Code skills directory, or
+# Claude Code
 /claude-code load-skill .claude/skills/task-compiler
+
+# Codex / Trae
+# Copy under the configured skills directory and the agent will auto-discover it
 ```
 
 Run a workflow:

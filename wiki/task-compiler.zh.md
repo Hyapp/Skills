@@ -2,6 +2,8 @@
 
 运行 **vDSL 工作流** — 通过 YAML 定义 DAG，按依赖顺序调度节点执行。
 
+兼容 **Claude Code**、**Codex**、**Trae**。
+
 ## 快速开始
 
 ```yaml
@@ -45,7 +47,7 @@ workflow:
 
 ```
 .claude/skills/task-compiler/
-├── SKILL.md                     # Skill 入口（Claude Code 加载点）
+├── SKILL.md                     # Skill 入口
 ├── interpreter/                  # vDSL 解释器
 │   ├── task_compiler.py          # 主入口
 │   ├── validate.py               # 校验 + plugin 发现
@@ -64,11 +66,14 @@ workflow:
 
 ## 使用方式
 
-在 Claude Code 中加载此 Skill：
+放入对应 Agent 的 skills 目录，或：
 
 ```bash
-# 放在 Claude Code 配置的 skills 目录中，或
+# Claude Code
 /claude-code load-skill .claude/skills/task-compiler
+
+# Codex / Trae
+# 拷贝到配置的 skills 目录下，Agent 会自动发现并加载
 ```
 
 运行工作流：
