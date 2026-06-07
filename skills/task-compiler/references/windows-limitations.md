@@ -13,7 +13,7 @@ command: |
   python -c "..."
 
 # �?正确 �?独立脚本
-command: python skills/task-compiler/workflows/scripts/my_script.py
+command: python workflows/scripts/my_script.py
 ```
 
 ## 独立 Python 脚本防坑清单

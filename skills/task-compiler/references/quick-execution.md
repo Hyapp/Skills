@@ -24,7 +24,7 @@
 
 ## 手动调用解释�?
 ```bash
-python skills/task-compiler/interpreter/task_compiler.py <workflow.json> \
+python interpreter/task_compiler.py <workflow.json> \
   [--output-dir ./output] [--session <name>] [--debug] [--clean]
 ```
 
