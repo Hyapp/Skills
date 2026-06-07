@@ -7,6 +7,13 @@ Usage:
 
 Input:  JSON file (Agent converts YAML -> JSON before calling this)
 Output: build_plan.json + per-node result files + per-agent parameter files
+
+The interpreter also runs plugin precheck during plan construction:
+plugin.yaml's validate.precheck.command is executed immediately when the
+corresponding plugin node is encountered. If precheck fails, the node is
+marked as failed and build_plan includes the error — the workflow does
+not proceed to execution.
+
 Flags:
     --agent-runtime <runtime>  Mark build_plan.json with the target agent platform.
                                Supported: codex, trae, claude.
@@ -25,6 +32,7 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,24 +71,53 @@ def _truncate_for_plan(nid: str, output_dir: Path, result: dict) -> dict:
 def _parse_plugin_yaml_section(lines: list, section: str) -> dict:
     """Parse a YAML section from plugin.yaml into a dict of key-value pairs.
 
-    Searches for 'section:' heading, then reads indented key: value lines below it.
-    Returns dict of found keys (values stripped of quotes).
+    Supports flat keys (command: ...) and sub-sections (precheck: /n  command: ...).
+    Values are stripped of quotes.
+    Returns dict of found keys, with nested sub-sections as nested dicts.
     """
     result = {}
     in_section = False
+    indent = -1
+    sub_key = None
+    sub_indent = -1
     for line in lines:
         stripped = line.strip()
         if stripped == f"{section}:":
             in_section = True
+            indent = len(line) - len(line.lstrip())
             continue
-        if in_section:
-            if not stripped or stripped.startswith("#"):
-                continue
-            if not stripped.startswith("- ") and not line.startswith(" "):
-                break
-            if stripped.startswith("command:"):
-                result["command"] = stripped[len("command:"):].strip().strip("\"'")
-                break
+        if not in_section:
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        cur_indent = len(line) - len(line.lstrip())
+        if cur_indent <= indent and stripped:
+            break
+
+        # Sub-section: "precheck:" or similar
+        if stripped.endswith(":") and not stripped.startswith("-"):
+            sub_key = stripped[:-1]
+            sub_indent = cur_indent
+            result[sub_key] = {}
+            continue
+
+        # Back to parent level after sub-section
+        if sub_key and cur_indent <= sub_indent and not stripped.endswith(":"):
+            sub_key = None
+            sub_indent = -1
+
+        # Key: value line
+        if ": " in stripped:
+            key, val = stripped.split(": ", 1)
+            val = val.strip().strip("\"'")
+            # Remove trailing comment
+            if "  #" in val:
+                val = val[: val.index("  #")].strip()
+            if sub_key:
+                result[sub_key][key.strip()] = val
+            else:
+                result[key.strip()] = val
     return result
 
 
@@ -137,6 +174,29 @@ def prepare_plugin(node: dict, output_dir: Path, available_plugins: dict) -> dic
         final_validate = validate_cmd.replace("{plugin_dir}", str(plugin_dir.resolve()))
         final_validate = final_validate.replace("{session_dir}", session_dir)
         plugin_params["validate_command"] = final_validate
+
+    # Optional: validate.precheck.command (executed immediately at plan construction time)
+    precheck = validate_cfg.get("precheck", {})
+    if precheck.get("command"):
+        precheck_cmd = precheck["command"]
+        final_precheck = precheck_cmd.replace("{plugin_dir}", str(plugin_dir.resolve()))
+        final_precheck = final_precheck.replace("{session_dir}", session_dir)
+        plugin_params["precheck_command"] = final_precheck
+
+        print(f"  [precheck] {plugin_name}...", end=" ", flush=True)
+        r = subprocess.run(
+            final_precheck,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if r.returncode != 0:
+            err = r.stderr.strip() or r.stdout.strip() or f"exit code {r.returncode}"
+            print("FAILED")
+            print(f"    {err}")
+            return {"status": "failed", "error": f"plugin '{plugin_name}' precheck failed: {err}"}
+        print("ok")
 
     return {"status": "pending", "plugin_params": plugin_params}
 

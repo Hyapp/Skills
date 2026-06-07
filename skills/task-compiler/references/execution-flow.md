@@ -93,6 +93,20 @@ wave 2: ...
 python ./interpreter/state_index.py <output_dir> dispatch <node-id-1> <node-id-2>
 ```
 
+### Plugin 环境预检（wave 0 之前）
+
+在派发任何 SubAgent 之前，对所有 plugin 节点执行环境预检：
+
+```bash
+for each plugin node with plugin_params.precheck_command:
+    python <plugin>/check_env.py <session_dir>
+    if exit ≠ 0 → 报错中止
+```
+
+预检使用 `plugin_params` 中的 `precheck_command`（来自 `plugin.yaml` 的 `validate.precheck.command`）。exit 0 继续，exit ≠ 0 中止（原因打印到 stderr）。预检与 IR 无关，只查环境就绪情况（工具在 PATH 中、auth 令牌有效、网络可达等）。
+
+预检失败 = 整个工作流不启动，**不进入 wave 0**。这保证了 static 模式下环境配错不用等到执行到对应 wave 才发现。
+
 然后按 wave 逐批执行：
 
 1. 按 wave 逐批处理，每批最多同时派发 `parallel_n` 个 SubAgent（使用 `Agent(run_in_background=true)`）

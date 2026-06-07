@@ -17,6 +17,8 @@ execute:
     format: json
 
 validate:
+  precheck:
+    command: python {plugin_dir}/check_env.py {session_dir}
   command: python {plugin_dir}/validate.py {session_dir}
 
 ir:
