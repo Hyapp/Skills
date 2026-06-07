@@ -36,6 +36,23 @@ python ./interpreter/task_compiler.py <workflow.json> \
 
 YAML 文件会自动转换为同名的 `.json` 文件后传入解释器。
 
+## 执行后状态管理
+
+解释器运行后使用 state hook 初始化执行状态：
+
+```bash
+python ./interpreter/execution_state.py ./output/<session> init
+```
+
+## 上下文恢复
+
+压缩后快速恢复：
+
+```bash
+python ./interpreter/execution_state.py ./output/<session> status
+python ./interpreter/state_index.py ./output/<session> snapshot
+```
+
 ## 参考 workflow
 
 - `./workflows/feishu-sales-report/workflow.yaml` — 创建飞书文档（内嵌电子表格 + 假数据 + 总结）
