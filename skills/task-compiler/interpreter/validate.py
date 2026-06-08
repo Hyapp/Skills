@@ -1,4 +1,4 @@
-"""vDSL schema validation."""
+"""DSL schema validation."""
 
 from collections import deque
 from pathlib import Path

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-vDSL Interpreter -- deterministic DSL evaluator for Vibe Workflows.
+DSL Interpreter -- deterministic workflow plan compiler.
 
 Usage:
     python task_compiler.py workflow.json [--output-dir ./output]
