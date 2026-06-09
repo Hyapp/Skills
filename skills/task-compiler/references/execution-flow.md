@@ -85,14 +85,6 @@ wave 2: ...
 | 批内有失败 + `on_failure: skip` | 标记失败，继续下一批 |
 | 批内有失败 + `recovery: manual` | 等正在跑的完成，停止，展示 manifest + 执行副产物，等用户确认后决定是否继续 |
 
-### Agent 节点执行步骤
-
-每批节点启动前先标记已派发：
-
-```bash
-python ./interpreter/state_index.py <output_dir> dispatch <node-id-1> <node-id-2>
-```
-
 ### Plugin 环境预检（wave 0 之前）
 
 在派发任何 SubAgent 之前，对所有 plugin 节点执行环境预检：
@@ -107,24 +99,43 @@ for each plugin node with plugin_params.precheck_command:
 
 预检失败 = 整个工作流不启动，**不进入 wave 0**。这保证了 static 模式下环境配错不用等到执行到对应 wave 才发现。
 
-然后按 wave 逐批执行：
+### 节点执行步骤
 
-1. 按 wave 逐批处理，每批最多同时派发 `parallel_n` 个 SubAgent（使用 `Agent(run_in_background=true)`）
-2. 每个 SubAgent 执行后，将结果写入 `<output_dir>/agents/<node-id>/result.md`
-3. 一批完成后，检查结果：
-   - 全成功 → 调用 state hook 推进到下一批：
+按 wave 逐批执行，每个 wave 的生命周期是原子性的——进入时一次注册全部节点，全部完成后才推进：
 
-     ```bash
-     python ./interpreter/state_index.py <output_dir> wave-complete
-     ```
-     hook 输出当前 wave、pending 节点、下一步操作。主 Agent 接续执行。
-   - 有 `manual` 失败 → 汇总所有已执行节点的副产物，展示给用户，请求确认
-   - 其他失败 → 按 `on_failure` + `recovery` 组合处理。必要时使用 rollback：
+1. **进入 wave N**：一次派发该 wave 的所有节点（无论类型、无论并发数）：
+   ```bash
+   python ./interpreter/state_index.py <output_dir> dispatch-wave <N>
+   ```
+   这会将 wave N 中所有 `pending` 节点标记为 `dispatched`，wave 状态变为 `in_progress`。
 
-     ```bash
-     python ./interpreter/state_index.py <output_dir> rollback 1
-     ```
-     rollback 输出受影响的节点列表，主 Agent 按列表重跑。
+2. **执行 wave 内节点**：wave 已进入，节点状态为 `dispatched`。主 Agent 遍历 wave 中的节点，按类型分别执行：
+   - **text 节点** — 立即执行（模板展开，无 I/O），完成后直接标记成功。
+     `text` 是唯一可能在一次响应中完成的节点类型。
+   - **program 节点** — 运行 shell 命令，等待退出码。
+   - **agent 节点** — 启动 SubAgent，等待完成。
+   - **plugin 节点** — 执行 plugin 校验 + 命令。
+   
+   同一 wave 内最多同时派发 `parallel_n` 个 SubAgent（使用 `Agent(run_in_background=true)`）。
+   非 text 节点在执行前都会经过 dispatch 状态：
+   ```
+   pending → dispatched → running/completed
+   ```
+
+3. **wave 完成**：当 wave 内**所有**节点都完成后（每个节点 status 为 `completed` 或 `failed`），调用：
+   ```bash
+   python ./interpreter/state_index.py <output_dir> wave-complete
+   ```
+   如果 wave 内所有节点成功 → wave 标记 `completed`，进入下一 wave。
+   如果有失败 → 按决策表处理（abort/skip/manual）：
+
+   | 条件 | 行为 |
+   |------|------|
+   | 全部成功 | 继续下一 wave |
+   | 有失败 + `on_failure: abort` | 停止，汇总错误 |
+   | 有失败 + `on_failure: skip` | 标记失败节点，继续下一 wave |
+   | 有失败 + `recovery: manual` | 停止，展示副产物，等用户确认 |
+
 4. 全部 wave 完成后进入阶段 4
 
 ### Plugin 节点执行步骤
@@ -170,7 +181,7 @@ pending_nodes:
 next_action: "dispatch: summary-3-2 (wave 2)"
 ```
 
-主 Agent 直接读 `next_action` 执行——dispatch summary-3-2。
+主 Agent 直接读 `next_action` 执行——dispatch-wave 或 dispatch。
 
 完整索引：
 
@@ -251,11 +262,11 @@ next_action: "re-dispatch wave 1: summary-2-2, summary-3-2, summary-1, render-do
 note: "3 idempotent node(s) skipped: generate-data-1, generate-data-2, build-ir"
 ```
 
-主 Agent 按 `affected_nodes` 列表重跑，`skipped_idempotent` 的节点结果直接复用：
+主 Agent 从目标 wave 开始重新派发。`skipped_idempotent` 的节点结果直接复用：
 
 ```bash
-# 重新派发受影响节点
-python ./interpreter/state_index.py <output_dir> dispatch summary-2-2 summary-3-2
+# 进入目标 wave：一次派发该 wave 所有受影响节点
+python ./interpreter/state_index.py <output_dir> dispatch-wave <target_wave>
 # 派发 SubAgent 执行...
 python ./interpreter/state_index.py <output_dir> wave-complete  # 推进
 ```

@@ -14,6 +14,7 @@ Usage:
     python state_index.py <session_dir> --wave <n>        # Wave detail
     python state_index.py <session_dir> --status <s>      # Filter by status
     python state_index.py <session_dir> dispatch <ids>    # Mark nodes dispatched
+    python state_index.py <session_dir> dispatch-wave <n>  # Mark all nodes in wave N dispatched
     python state_index.py <session_dir> wave-complete     # Advance to next wave
     python state_index.py <session_dir> rollback <wave>   # Roll back to specific wave
     python state_index.py <session_dir> rollback          # Default: one wave back
@@ -303,6 +304,43 @@ def cmd_dispatch(session_dir: Path, node_ids: list[str]):
 
     write_state(session_dir, state)
     out({"action": "dispatch", "dispatched": marked})
+
+
+def cmd_dispatch_wave(session_dir: Path, wave_num: int):
+    """Mark all pending nodes in wave N as dispatched.
+    This is the wave-level atomic operation: enter a wave by dispatching
+    all its nodes at once. Individual nodes are executed by the main Agent
+    (respecting parallel_n), and wave-complete is called when all finish.
+    """
+    state = read_state(session_dir)
+    if not state:
+        print("No state found. Run 'init' first.", file=sys.stderr)
+        sys.exit(1)
+
+    if wave_num < 0 or wave_num >= len(state["waves"]):
+        print(f"Invalid wave index {wave_num}. Valid: 0-{len(state['waves']) - 1}", file=sys.stderr)
+        sys.exit(1)
+
+    target = state["waves"][wave_num]
+    marked = []
+    for ns in target["nodes"]:
+        if ns["status"] == "pending":
+            ns["status"] = "dispatched"
+            marked.append(ns["id"])
+    if marked and target["status"] == "pending":
+        target["status"] = "in_progress"
+
+    write_state(session_dir, state)
+
+    total = len(target["nodes"])
+    output = {
+        "action": "dispatch-wave",
+        "wave": wave_num,
+        "dispatched": marked,
+        "total_in_wave": total,
+        "status": target["status"],
+    }
+    out(output)
 
 
 def cmd_wave_complete(session_dir: Path):
@@ -611,6 +649,10 @@ def main():
         elif args[i] in ("init", "status", "wave-complete"):
             action = args[i]
             i += 1
+        elif args[i] == "dispatch-wave" and i + 1 < len(args):
+            action = "dispatch-wave"
+            action_args = [int(args[i + 1])]
+            i += 2
         elif args[i] == "rollback":
             action = "rollback"
             if i + 1 < len(args) and args[i + 1].lstrip("-").isdigit():
@@ -651,6 +693,8 @@ def main():
         cmd_status(session_dir)
     elif action == "dispatch":
         cmd_dispatch(session_dir, action_args)
+    elif action == "dispatch-wave":
+        cmd_dispatch_wave(session_dir, action_args[0])
     elif action == "wave-complete":
         cmd_wave_complete(session_dir)
     elif action == "rollback":
