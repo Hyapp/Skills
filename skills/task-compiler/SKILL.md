@@ -1,5 +1,5 @@
 ---
-name: task-compiler
+name: agent-workflow
 description: 运行 DSL 工作流 — 解析 DSL 文件，调度 SubAgent，确认结果
 ---
 
